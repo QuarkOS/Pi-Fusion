@@ -1,4 +1,5 @@
 {
+  "configured": false,
   "provider": "opencode-go",
   "providers": {
     "opencode-go": {
