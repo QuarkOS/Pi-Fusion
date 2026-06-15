@@ -40,8 +40,8 @@ function loadConfig(configPath) {
         defaultModels: {
           technical_expert: 'qwen3.7-plus',
           devils_advocate: 'deepseek-v4-pro',
-          systems_thinker: 'glm-5.1',
-          judge: 'qwen3.7-plus',
+          systems_thinker: 'kimi-k2.7-code',
+          judge: 'deepseek-v4-pro',
           synthesis: 'qwen3.7-plus'
         }
       }
@@ -123,11 +123,11 @@ async function runSetupWizard(configPath) {
       };
     }
     config.providers['opencode-go'].defaultModels = {
-      technical_expert: 'gemini-3-flash',
+      technical_expert: 'qwen3.7-plus',
       devils_advocate: 'deepseek-v4-pro',
       systems_thinker: 'kimi-k2.7-code',
       judge: 'deepseek-v4-pro',
-      synthesis: 'deepseek-v4-pro'
+      synthesis: 'qwen3.7-plus'
     };
     console.log(chalk.green('\n✓ Balanced / OpenCode Go Preset configured.'));
   } else {
