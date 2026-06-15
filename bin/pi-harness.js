@@ -31,17 +31,18 @@ function loadConfig(configPath) {
 
   // Fallback default config if no config files can be read
   return {
+    configured: false,
     provider: 'opencode-go',
     providers: {
       'opencode-go': {
         baseUrl: 'https://opencode.ai/zen/go/v1',
         apiKeyEnv: 'OC_GO_CC_API_KEY',
         defaultModels: {
-          technical_expert: 'qwen3.7-max',
+          technical_expert: 'qwen3.7-plus',
           devils_advocate: 'deepseek-v4-pro',
-          systems_thinker: 'kimi-k2.7-code',
-          judge: 'qwen3.7-max',
-          synthesis: 'qwen3.7-max'
+          systems_thinker: 'glm-5.1',
+          judge: 'qwen3.7-plus',
+          synthesis: 'qwen3.7-plus'
         }
       }
     },
@@ -65,13 +66,109 @@ function loadConfig(configPath) {
   };
 }
 
+// Interactive prompt utility
+function askQuestion(query) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise((resolve) => rl.question(query, (ans) => {
+    rl.close();
+    resolve(ans.trim());
+  }));
+}
+
+// Wizard to set configurations
+async function runSetupWizard(configPath) {
+  console.log(chalk.bold.cyan('\n⚙️  Pi Fusion Configuration Wizard'));
+  console.log('Select a deliberation model preset:');
+  console.log(`[1] ${chalk.bold.yellow('Quality / Frontier')} (Opus 4.8 + GPT 5.5 + Gemini 3.1 Pro)`);
+  console.log(`[2] ${chalk.bold.green('Balanced / OpenCode Go')} (Gemini 3 Flash + Kimi K2.7 Code + Deepseek V4 Pro)`);
+  console.log(`[3] ${chalk.bold.blue('Custom Configuration')}`);
+
+  let choice = '';
+  while (choice !== '1' && choice !== '2' && choice !== '3') {
+    choice = await askQuestion('\nChoose preset [1-3]: ');
+  }
+
+  let config = loadConfig(configPath);
+  config.configured = true;
+
+  if (choice === '1') {
+    config.provider = 'openai';
+    if (!config.providers) config.providers = {};
+    if (!config.providers.openai) {
+      config.providers.openai = {
+        baseUrl: 'https://api.openai.com/v1',
+        apiKeyEnvVar: 'OPENAI_API_KEY',
+        defaultModels: {}
+      };
+    }
+    config.providers.openai.defaultModels = {
+      technical_expert: 'gpt-5.5',
+      devils_advocate: 'opus-4.8',
+      systems_thinker: 'gemini-3.1-pro',
+      judge: 'gpt-5.5',
+      synthesis: 'gpt-5.5'
+    };
+    console.log(chalk.green('\n✓ Quality / Frontier Preset configured.'));
+  } else if (choice === '2') {
+    config.provider = 'opencode-go';
+    if (!config.providers) config.providers = {};
+    if (!config.providers['opencode-go']) {
+      config.providers['opencode-go'] = {
+        baseUrl: 'https://opencode.ai/zen/go/v1',
+        apiKeyEnvVar: 'OC_GO_CC_API_KEY',
+        defaultModels: {}
+      };
+    }
+    config.providers['opencode-go'].defaultModels = {
+      technical_expert: 'gemini-3-flash',
+      devils_advocate: 'deepseek-v4-pro',
+      systems_thinker: 'kimi-k2.7-code',
+      judge: 'deepseek-v4-pro',
+      synthesis: 'deepseek-v4-pro'
+    };
+    console.log(chalk.green('\n✓ Balanced / OpenCode Go Preset configured.'));
+  } else {
+    // Custom Configuration
+    console.log(chalk.bold.blue('\n--- Custom Model Configuration ---'));
+    const provider = await askQuestion('Select Provider (opencode-go / openai) [default: opencode-go]: ') || 'opencode-go';
+    config.provider = provider;
+
+    if (!config.providers) config.providers = {};
+    if (!config.providers[provider]) {
+      config.providers[provider] = {
+        baseUrl: await askQuestion('API Base URL: ') || 'https://opencode.ai/zen/go/v1',
+        apiKeyEnvVar: await askQuestion('API Key Env Var name: ') || 'OC_GO_CC_API_KEY',
+        defaultModels: {}
+      };
+    }
+
+    const defaultModels = config.providers[provider].defaultModels;
+    defaultModels.technical_expert = await askQuestion('Technical Expert Model Name: ') || 'qwen3.7-plus';
+    defaultModels.devils_advocate = await askQuestion('Devil\'s Advocate Model Name: ') || 'deepseek-v4-pro';
+    defaultModels.systems_thinker = await askQuestion('Systems Thinker Model Name: ') || 'glm-5.1';
+    defaultModels.judge = await askQuestion('Judge Model Name: ') || 'qwen3.7-plus';
+    defaultModels.synthesis = await askQuestion('Synthesis Model Name: ') || 'qwen3.7-plus';
+
+    console.log(chalk.green('\n✓ Custom configuration configured.'));
+  }
+
+  // Save config back to file
+  const finalConfigPath = configPath || path.join(process.cwd(), 'pi-harness.config.json');
+  fs.writeFileSync(finalConfigPath, JSON.stringify(config, null, 2), 'utf8');
+  console.log(chalk.cyan(`Config file successfully written to: ${finalConfigPath}\n`));
+  return config;
+}
+
 // Parse custom model overrides (e.g. "technical_expert=qwen3.7-max,judge=deepseek-v4-pro")
 function parseModelOverrides(overridesStr, config, provider) {
   if (!overridesStr) return;
   const parts = overridesStr.split(',');
   for (const part of parts) {
     const [key, value] = part.split('=');
-    if (key && value && config.providers[provider].defaultModels[key] !== undefined) {
+    if (key && value && config.providers[provider] && config.providers[provider].defaultModels[key] !== undefined) {
       config.providers[provider].defaultModels[key] = value;
     }
   }
@@ -167,12 +264,22 @@ program
   .argument('[prompt]', 'The query or coding task to deliberate on')
   .option('-v, --verbose', 'Print raw responses from each panel expert', false)
   .option('-i, --interactive', 'Start interactive chat/REPL mode', false)
+  .option('-s, --setup', 'Run the interactive configuration wizard to select presets', false)
   .option('-p, --provider <name>', 'Provider to use (opencode-go, openai)')
   .option('-c, --config <path>', 'Path to custom config JSON file')
   .option('-m, --models <overrides>', 'Comma-separated model overrides (e.g. judge=deepseek-v4-pro,synthesis=glm-5.1)')
   .action(async (prompt, options) => {
+    // Determine target config path
+    const targetConfigPath = options.config || path.join(process.cwd(), 'pi-harness.config.json');
+
     // Load config
-    const config = loadConfig(options.config);
+    let config = loadConfig(options.config);
+
+    // Run setup wizard if requested or not yet configured
+    if (options.setup || !config.configured) {
+      config = await runSetupWizard(targetConfigPath);
+    }
+
     const provider = options.provider || config.provider || 'opencode-go';
 
     // Apply model overrides
