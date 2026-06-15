@@ -1,11 +1,11 @@
 {
-  "name": "pi-harness",
+  "name": "pi-fusion",
   "version": "1.0.0",
   "description": "Multi-model deliberation harness (OpenRouter Fusion pattern) for OpenCode Go",
   "main": "index.js",
   "type": "module",
   "bin": {
-    "pi-harness": "./bin/pi-harness.js"
+    "pi-fusion": "./bin/pi-harness.js"
   },
   "scripts": {
     "start": "node bin/pi-harness.js",
@@ -17,7 +17,8 @@
     "fusion",
     "deliberation",
     "opencode",
-    "agent"
+    "agent",
+    "pi-package"
   ],
   "author": "Antigravity Pair",
   "license": "MIT",
