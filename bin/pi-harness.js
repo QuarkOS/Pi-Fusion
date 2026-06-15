@@ -38,11 +38,11 @@ function loadConfig(configPath) {
         baseUrl: 'https://opencode.ai/zen/go/v1',
         apiKeyEnv: 'OC_GO_CC_API_KEY',
         defaultModels: {
-          technical_expert: 'qwen3.7-plus',
+          technical_expert: 'kimi-k2.7-code',
           devils_advocate: 'deepseek-v4-pro',
-          systems_thinker: 'kimi-k2.7-code',
+          systems_thinker: 'kimi-k2.6',
           judge: 'deepseek-v4-pro',
-          synthesis: 'qwen3.7-plus'
+          synthesis: 'kimi-k2.7-code'
         }
       }
     },
@@ -123,11 +123,11 @@ async function runSetupWizard(configPath) {
       };
     }
     config.providers['opencode-go'].defaultModels = {
-      technical_expert: 'qwen3.7-plus',
+      technical_expert: 'kimi-k2.7-code',
       devils_advocate: 'deepseek-v4-pro',
-      systems_thinker: 'kimi-k2.7-code',
+      systems_thinker: 'kimi-k2.6',
       judge: 'deepseek-v4-pro',
-      synthesis: 'qwen3.7-plus'
+      synthesis: 'kimi-k2.7-code'
     };
     console.log(chalk.green('\n✓ Balanced / OpenCode Go Preset configured.'));
   } else {

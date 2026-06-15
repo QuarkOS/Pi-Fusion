@@ -12,11 +12,11 @@ const defaultConfig = {
       baseUrl: 'https://opencode.ai/zen/go/v1',
       apiKeyEnv: 'OC_GO_CC_API_KEY',
       defaultModels: {
-        technical_expert: 'qwen3.7-plus',
+        technical_expert: 'kimi-k2.7-code',
         devils_advocate: 'deepseek-v4-pro',
-        systems_thinker: 'glm-5.1',
-        judge: 'qwen3.7-plus',
-        synthesis: 'qwen3.7-plus'
+        systems_thinker: 'kimi-k2.6',
+        judge: 'deepseek-v4-pro',
+        synthesis: 'kimi-k2.7-code'
       }
     }
   },
