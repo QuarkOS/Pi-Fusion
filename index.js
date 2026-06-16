@@ -39,6 +39,7 @@ const isProviderConnected = (provider, auth) => {
 
 // Load default config
 const defaultConfig = {
+  configured: true,
   provider: 'opencode-go',
   providers: {
     'opencode-go': {
@@ -416,9 +417,7 @@ export default function (pi) {
           // Check configuration
           let config = getLocalConfig();
           if (!config || !config.configured) {
-            if (activeUi) {
-              config = await configureHarness(activeUi);
-            }
+            config = defaultConfig;
           }
 
           if (!config) {
