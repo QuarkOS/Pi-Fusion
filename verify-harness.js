@@ -21,11 +21,11 @@ async function runVerification() {
   const providerConfig = config.providers[provider];
   console.log(`Configured Provider: ${chalk.cyan(provider)}`);
   console.log(`Base URL: ${chalk.cyan(providerConfig.baseUrl)}`);
-  console.log(`API Key Env Var: ${chalk.cyan(providerConfig.apiKeyEnvVar)}`);
+  console.log(`API Key Env Var: ${chalk.cyan(providerConfig.apiKeyEnv)}`);
 
   const client = new ApiClient({
     baseUrl: providerConfig.baseUrl,
-    apiKeyEnvVar: providerConfig.apiKeyEnvVar
+    apiKeyEnvVar: providerConfig.apiKeyEnv
   });
 
   // Test connection

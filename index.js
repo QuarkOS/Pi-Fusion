@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { ApiClient } from './lib/api.js';
 import { Deliberator } from './lib/deliberation.js';
 
@@ -123,4 +124,92 @@ export default function (pi) {
       }
     }
   });
+
+  // 3. Register a custom model provider for the deliberation model
+  pi.registerProvider('fusion', {
+    name: 'Pi Fusion Deliberation',
+    baseUrl: 'https://opencode.ai/zen/go/v1',
+    apiKey: 'dummy',
+    api: 'fusion-api',
+    models: [
+      {
+        id: 'fusion',
+        name: 'Pi Fusion Deliberation Model',
+        reasoning: false,
+        input: ['text'],
+        contextWindow: 128000,
+        maxTokens: 4096
+      }
+    ],
+    streamSimple: (model, context, options) => {
+      const outer = createAssistantMessageEventStream();
+      
+      // Get user query/prompt
+      const lastUserMsg = context.messages.filter(m => m.role === 'user').pop();
+      let prompt = '';
+      if (lastUserMsg) {
+        if (typeof lastUserMsg.content === 'string') {
+          prompt = lastUserMsg.content;
+        } else if (Array.isArray(lastUserMsg.content)) {
+          prompt = lastUserMsg.content
+            .filter(part => part.type === 'text')
+            .map(part => part.text)
+            .join('\n');
+        }
+      }
+
+      queueMicrotask(async () => {
+        try {
+          if (options?.onResponse) {
+            await options.onResponse({ status: 200, headers: {} }, model);
+          }
+
+          const deliberator = getDeliberator();
+          const result = await deliberator.deliberate(prompt);
+          const resultText = result.synthesis;
+
+          const partial = {
+            role: "assistant",
+            content: []
+          };
+
+          // Start text block
+          partial.content = [{ type: "text", text: "" }];
+          outer.push({ type: "text_start", contentIndex: 0, partial: { ...partial } });
+
+          // Send delta
+          partial.content[0].text = resultText;
+          outer.push({ type: "text_delta", contentIndex: 0, delta: resultText, partial: { ...partial } });
+
+          // End text block
+          outer.push({ type: "text_end", contentIndex: 0, content: resultText, partial: { ...partial } });
+
+          // Complete message
+          const finalMessage = {
+            role: "assistant",
+            content: [
+              { type: "text", text: resultText }
+            ],
+            stopReason: "stop"
+          };
+          outer.push({ type: "done", reason: "stop", message: finalMessage });
+          outer.end(finalMessage);
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          const finalMessage = {
+            role: "assistant",
+            content: [
+              { type: "text", text: `Error running deliberation: ${errMsg}` }
+            ],
+            stopReason: "error"
+          };
+          outer.push({ type: "error", reason: "error", error: finalMessage });
+          outer.end(finalMessage);
+        }
+      });
+
+      return outer;
+    }
+  });
 }
+
