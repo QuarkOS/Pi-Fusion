@@ -297,13 +297,25 @@ export default function (pi) {
         return;
       }
 
-      ctx.ui.notify('Starting deliberation pipeline...', 'info');
+      ctx.ui.write('\n🧠 **Starting Deliberation Pipeline**\n');
 
       try {
         const deliberator = getDeliberator();
         const result = await deliberator.deliberate(prompt, {
-          onProgress: (stage) => {
-            ctx.ui.notify(`Stage progress: ${stage}`, 'info');
+          onProgress: (stage, data) => {
+            if (stage === 'panel-start') {
+              ctx.ui.write(` ├─ ⏳ Running parallel panel expert models (${data.models.technical_expert}, ${data.models.devils_advocate}, ${data.models.systems_thinker})...\n`);
+            } else if (stage === 'panel-end') {
+              ctx.ui.write(` ├─ ✅ Expert panel responses received.\n`);
+            } else if (stage === 'judge-start') {
+              ctx.ui.write(` ├─ ⚖️ Comparing responses using Deliberation Judge (${data.model})...\n`);
+            } else if (stage === 'judge-end') {
+              ctx.ui.write(` ├─ ✅ Deliberation analysis generated.\n`);
+            } else if (stage === 'synthesis-start') {
+              ctx.ui.write(` ├─ 📝 Synthesizing final grounded response (${data.model})...\n`);
+            } else if (stage === 'synthesis-end') {
+              ctx.ui.write(` └─ ✅ Synthesis completed.\n\n---\n\n`);
+            }
           }
         });
 
@@ -312,7 +324,7 @@ export default function (pi) {
         ctx.ui.write(result.synthesis);
         ctx.ui.write('\n\n---------------------------------------\n\n');
       } catch (error) {
-        ctx.ui.notify(`Deliberation failed: ${error.message}`, 'error');
+        ctx.ui.write(`\n❌ Deliberation failed: ${error.message}\n`);
       }
     }
   });
@@ -342,7 +354,6 @@ export default function (pi) {
     }
   });
 
-  // 3. Register a custom model provider for the deliberation model
   pi.registerProvider('fusion', {
     name: 'Pi Fusion Deliberation',
     baseUrl: 'https://opencode.ai/zen/go/v1',
@@ -352,10 +363,19 @@ export default function (pi) {
       {
         id: 'fusion',
         name: 'Pi Fusion Deliberation Model',
+        api: 'fusion-api',
+        provider: 'fusion',
+        baseUrl: 'https://opencode.ai/zen/go/v1',
         reasoning: false,
         input: ['text'],
         contextWindow: 128000,
-        maxTokens: 4096
+        maxTokens: 4096,
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        }
       }
     ],
     streamSimple: (model, context, options) => {
@@ -401,31 +421,59 @@ export default function (pi) {
             apiKeyEnvVar: providerConfig.apiKeyEnv
           });
 
-          const deliberator = new Deliberator({ apiClient, config });
-          const result = await deliberator.deliberate(prompt);
-          const resultText = result.synthesis;
+          let streamedText = '';
 
-          const partial = {
-            role: "assistant",
-            content: []
+          const sendDelta = (text) => {
+            streamedText += text;
+            outer.push({ 
+              type: "text_delta", 
+              contentIndex: 0, 
+              delta: text, 
+              partial: { role: "assistant", content: [{ type: "text", text: streamedText }] } 
+            });
           };
 
           // Start text block
-          partial.content = [{ type: "text", text: "" }];
-          outer.push({ type: "text_start", contentIndex: 0, partial: { ...partial } });
+          outer.push({ 
+            type: "text_start", 
+            contentIndex: 0, 
+            partial: { role: "assistant", content: [{ type: "text", text: "" }] } 
+          });
 
-          // Send delta
-          partial.content[0].text = resultText;
-          outer.push({ type: "text_delta", contentIndex: 0, delta: resultText, partial: { ...partial } });
+          sendDelta('🧠 **Starting Deliberation Pipeline**\n');
+
+          const deliberator = new Deliberator({ apiClient, config });
+          const result = await deliberator.deliberate(prompt, {
+            onProgress: (stage, data) => {
+              if (stage === 'panel-start') {
+                sendDelta(` ├─ ⏳ Running parallel panel expert models (${data.models.technical_expert}, ${data.models.devils_advocate}, ${data.models.systems_thinker})...\n`);
+              } else if (stage === 'panel-end') {
+                sendDelta(` ├─ ✅ Expert panel responses received.\n`);
+              } else if (stage === 'judge-start') {
+                sendDelta(` ├─ ⚖️ Comparing responses using Deliberation Judge (${data.model})...\n`);
+              } else if (stage === 'judge-end') {
+                sendDelta(` ├─ ✅ Deliberation analysis generated.\n`);
+              } else if (stage === 'synthesis-start') {
+                sendDelta(` ├─ 📝 Synthesizing final grounded response (${data.model})...\n`);
+              } else if (stage === 'synthesis-end') {
+                sendDelta(` └─ ✅ Synthesis completed.\n\n---\n\n`);
+              }
+            }
+          });
+
+          const resultText = result.synthesis;
+
+          // Send the final synthesis content
+          sendDelta(resultText);
 
           // End text block
-          outer.push({ type: "text_end", contentIndex: 0, content: resultText, partial: { ...partial } });
+          outer.push({ type: "text_end", contentIndex: 0, content: streamedText, partial: { role: "assistant", content: [{ type: "text", text: streamedText }] } });
 
           // Complete message
           const finalMessage = {
             role: "assistant",
             content: [
-              { type: "text", text: resultText }
+              { type: "text", text: streamedText }
             ],
             stopReason: "stop"
           };
