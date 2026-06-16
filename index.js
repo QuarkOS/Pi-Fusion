@@ -1,9 +1,41 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import os from 'node:os';
+import { createAssistantMessageEventStream, getProviders, getModels } from '@earendil-works/pi-ai';
 import { ApiClient } from './lib/api.js';
 import { Deliberator } from './lib/deliberation.js';
+
+const getPiAuth = () => {
+  const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent');
+  const authPath = path.join(agentDir, 'auth.json');
+  if (fs.existsSync(authPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(authPath, 'utf8'));
+    } catch {
+      // Ignore
+    }
+  }
+  return {};
+};
+
+const isProviderConnected = (provider, auth) => {
+  if (auth[provider] && auth[provider].key) {
+    return true;
+  }
+  const envVars = {
+    'opencode-go': ['OC_GO_CC_API_KEY', 'OPENCODE_API_KEY'],
+    'openai': ['OPENAI_API_KEY'],
+    'anthropic': ['ANTHROPIC_API_KEY'],
+    'google': ['GEMINI_API_KEY'],
+    'google-vertex': ['GEMINI_API_KEY'],
+    'deepseek': ['DEEPSEEK_API_KEY'],
+    'xai': ['XAI_API_KEY'],
+    'groq': ['GROQ_API_KEY']
+  };
+  const vars = envVars[provider] || [];
+  return vars.some(v => !!process.env[v]);
+};
 
 // Load default config
 const defaultConfig = {
@@ -33,7 +65,7 @@ const defaultConfig = {
     }
   },
   judge: {
-    systemPrompt: "You are the Deliberation Judge. Compare the three panel expert responses. Output ONLY valid JSON containing: consensus (array), contradictions (array), partial_coverage (array), unique_insights (array), and blind_spots (array)."
+    systemPrompt: "You are the Deliberation Judge. Compare the three panel expert responses. Output a JSON block wrapped in a standard markdown code block (using ```json ... ```) containing: consensus (array), contradictions (array), partial_coverage (array), unique_insights (array), and blind_spots (array)."
   },
   synthesis: {
     systemPrompt: "You are the Synthesis Model. Write the final comprehensive response to the user query, grounded strictly in the panel responses and the judge's JSON analysis."
@@ -70,9 +102,16 @@ export default function (pi) {
     const provider = config.provider || 'opencode-go';
     const providerConfig = config.providers[provider];
     
+    let apiKey = '';
+    const auth = getPiAuth();
+    if (auth[provider] && auth[provider].key) {
+      apiKey = auth[provider].key;
+    }
+
     const apiClient = new ApiClient({
       baseUrl: providerConfig.baseUrl,
-      apiKeyEnvVar: providerConfig.apiKeyEnv
+      apiKeyEnvVar: providerConfig.apiKeyEnv,
+      apiKey: apiKey
     });
 
     return new Deliberator({ apiClient, config });
@@ -87,22 +126,19 @@ export default function (pi) {
       'Custom Configuration'
     ]);
 
-    let config = {
-      configured: true,
-      provider: 'opencode-go',
-      providers: {
-        'opencode-go': {
-          baseUrl: 'https://opencode.ai/zen/go/v1',
-          apiKeyEnv: 'OC_GO_CC_API_KEY',
-          defaultModels: {
-            technical_expert: 'kimi-k2.7-code',
-            devils_advocate: 'deepseek-v4-pro',
-            systems_thinker: 'kimi-k2.6',
-            judge: 'deepseek-v4-pro',
-            synthesis: 'kimi-k2.7-code'
-          }
-        },
-        'openai': {
+    let config = getLocalConfig();
+    config.configured = true;
+
+    // Ensure providers object exists
+    if (!config.providers) {
+      config.providers = {};
+    }
+
+    if (choice.startsWith('Quality')) {
+      config.provider = 'openai';
+      // Fallback defaults for Quality preset if not present
+      if (!config.providers.openai) {
+        config.providers.openai = {
           baseUrl: 'https://api.openai.com/v1',
           apiKeyEnv: 'OPENAI_API_KEY',
           defaultModels: {
@@ -112,46 +148,107 @@ export default function (pi) {
             judge: 'gpt-5.5',
             synthesis: 'gpt-5.5'
           }
-        }
-      },
-      panel: {
-        technical_expert: {
-          systemPrompt: "You are a Technical Expert coding agent. Focus on correctness, design patterns, security, and performance. Be concise."
-        },
-        devils_advocate: {
-          systemPrompt: "You are a Devil's Advocate coding agent. Challenge assumptions, identify risks, and suggest alternatives. Be critical."
-        },
-        systems_thinker: {
-          systemPrompt: "You are a Systems Thinker coding agent. Focus on integration, interfaces, maintainability, and testing. Holistic view."
-        }
-      },
-      judge: {
-        systemPrompt: "You are the Deliberation Judge. Compare the three panel expert responses. Output ONLY valid JSON containing: consensus (array), contradictions (array), partial_coverage (array), unique_insights (array), and blind_spots (array)."
-      },
-      synthesis: {
-        systemPrompt: "You are the Synthesis Model. Write the final comprehensive response to the user query, grounded strictly in the panel responses and the judge's JSON analysis."
+        };
       }
-    };
-
-    if (choice.startsWith('Quality')) {
-      config.provider = 'openai';
       ui.notify('Quality / Frontier Preset configured.', 'info');
     } else if (choice.startsWith('Balanced')) {
       config.provider = 'opencode-go';
+      // Fallback defaults for Balanced preset if not present
+      if (!config.providers['opencode-go']) {
+        config.providers['opencode-go'] = {
+          baseUrl: 'https://opencode.ai/zen/go/v1',
+          apiKeyEnv: 'OC_GO_CC_API_KEY',
+          defaultModels: {
+            technical_expert: 'kimi-k2.7-code',
+            devils_advocate: 'deepseek-v4-pro',
+            systems_thinker: 'kimi-k2.6',
+            judge: 'deepseek-v4-pro',
+            synthesis: 'kimi-k2.7-code'
+          }
+        };
+      }
       ui.notify('Balanced / OpenCode Go Preset configured.', 'info');
     } else {
       // Custom Configuration
-      const provider = await ui.select('Select Provider:', ['opencode-go', 'openai']) || 'opencode-go';
+      const auth = getPiAuth();
+      const availableProviders = getProviders();
+
+      const providerChoices = availableProviders.map(p => {
+        const connected = isProviderConnected(p, auth);
+        return {
+          id: p,
+          label: connected ? `${p} (connected)` : p
+        };
+      });
+
+      const providerLabelChoice = await ui.select(
+        'Select Provider:',
+        providerChoices.map(c => c.label)
+      ) || 'opencode-go';
+
+      const selectedProviderChoice = providerChoices.find(c => c.label === providerLabelChoice) || providerChoices[0];
+      const provider = selectedProviderChoice.id;
       config.provider = provider;
 
-      const baseUrl = await ui.input('API Base URL:', provider === 'opencode-go' ? 'https://opencode.ai/zen/go/v1' : 'https://api.openai.com/v1');
-      const apiKeyEnv = await ui.input('API Key Env Var name:', provider === 'opencode-go' ? 'OC_GO_CC_API_KEY' : 'OPENAI_API_KEY');
+      const providerModels = getModels(provider);
+      const defaultBaseUrl = providerModels.length > 0 ? providerModels[0].baseUrl : '';
 
-      const technical_expert = await ui.input('Technical Expert Model Name:', 'qwen3.7-plus');
-      const devils_advocate = await ui.input('Devil\'s Advocate Model Name:', 'deepseek-v4-pro');
-      const systems_thinker = await ui.input('Systems Thinker Model Name:', 'glm-5.1');
-      const judge = await ui.input('Judge Model Name:', 'qwen3.7-plus');
-      const synthesis = await ui.input('Synthesis Model Name:', 'qwen3.7-plus');
+      // Determine default API Key Env Var name
+      const defaultEnvVars = {
+        'opencode-go': 'OC_GO_CC_API_KEY',
+        'openai': 'OPENAI_API_KEY',
+        'anthropic': 'ANTHROPIC_API_KEY',
+        'google': 'GEMINI_API_KEY',
+        'google-vertex': 'GEMINI_API_KEY',
+        'deepseek': 'DEEPSEEK_API_KEY',
+        'xai': 'XAI_API_KEY',
+        'groq': 'GROQ_API_KEY'
+      };
+      const defaultApiKeyEnv = defaultEnvVars[provider] || '';
+
+      let baseUrl = defaultBaseUrl;
+      let apiKeyEnv = defaultApiKeyEnv;
+
+      const connectionChoice = await ui.select(`Use default connection settings for ${provider}?`, [
+        `Yes (URL: ${baseUrl || 'N/A'}, Key: ${auth[provider] ? 'Saved in Pi' : (apiKeyEnv ? 'Env Var ' + apiKeyEnv : 'Custom')})`,
+        'No, enter custom URL and Key Env Var'
+      ]);
+
+      if (connectionChoice && connectionChoice.startsWith('No')) {
+        baseUrl = await ui.input('API Base URL:', baseUrl);
+        apiKeyEnv = await ui.input('API Key Env Var name:', apiKeyEnv);
+      }
+
+      // Configure each model role
+      const selectModelForRole = async (roleName, defaultModel) => {
+        if (providerModels.length === 0) {
+          return await ui.input(`${roleName} Model Name:`, defaultModel);
+        }
+
+        const modelOptions = providerModels.map(m => m.id);
+        const customOption = '[Enter Custom Model Name...]';
+        const options = [...modelOptions, customOption];
+
+        const selected = await ui.select(
+          `Select model for ${roleName} (Default: ${defaultModel}):`,
+          options
+        );
+
+        if (selected === customOption) {
+          return await ui.input(`Enter custom model name for ${roleName}:`, defaultModel);
+        }
+
+        return selected || defaultModel;
+      };
+
+      const existingProviderConfig = config.providers[provider] || {};
+      const existingModels = existingProviderConfig.defaultModels || {};
+
+      const technical_expert = await selectModelForRole('Technical Expert', existingModels.technical_expert || 'qwen3.7-plus');
+      const devils_advocate = await selectModelForRole('Devil\'s Advocate', existingModels.devils_advocate || 'deepseek-v4-pro');
+      const systems_thinker = await selectModelForRole('Systems Thinker', existingModels.systems_thinker || 'glm-5.1');
+      const judge = await selectModelForRole('Judge', existingModels.judge || 'qwen3.7-plus');
+      const synthesis = await selectModelForRole('Synthesis', existingModels.synthesis || 'qwen3.7-plus');
 
       config.providers[provider] = {
         baseUrl,
