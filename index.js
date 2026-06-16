@@ -45,20 +45,28 @@ const defaultConfig = {
  * Ref: https://pi.dev/docs/extensions
  */
 export default function (pi) {
-  // Helper to initialize deliberator
-  const getDeliberator = () => {
-    let config = defaultConfig;
-    
+  let activeUi = null;
+
+  // Capture active UI context from agent_start event
+  pi.on('agent_start', (event, ctx) => {
+    activeUi = ctx.ui;
+  });
+
+  const getLocalConfig = () => {
     // Try to load local config if it exists in the workspace
     const localConfigPath = path.join(process.cwd(), 'pi-harness.config.json');
     if (fs.existsSync(localConfigPath)) {
       try {
-        config = JSON.parse(fs.readFileSync(localConfigPath, 'utf8'));
+        return JSON.parse(fs.readFileSync(localConfigPath, 'utf8'));
       } catch {
-        // Fallback to default
+        // Ignore and fallback
       }
     }
+    return defaultConfig;
+  };
 
+  const getDeliberator = () => {
+    const config = getLocalConfig();
     const provider = config.provider || 'opencode-go';
     const providerConfig = config.providers[provider];
     
@@ -70,6 +78,107 @@ export default function (pi) {
     return new Deliberator({ apiClient, config });
   };
 
+  const configureHarness = async (ui) => {
+    if (!ui) return null;
+    
+    const choice = await ui.select('Select a deliberation model preset:', [
+      'Quality / Frontier (Opus 4.8 + GPT 5.5 + Gemini 3.1 Pro)',
+      'Balanced / OpenCode Go (Gemini 3 Flash + Kimi K2.7 Code + Deepseek V4 Pro)',
+      'Custom Configuration'
+    ]);
+
+    let config = {
+      configured: true,
+      provider: 'opencode-go',
+      providers: {
+        'opencode-go': {
+          baseUrl: 'https://opencode.ai/zen/go/v1',
+          apiKeyEnv: 'OC_GO_CC_API_KEY',
+          defaultModels: {
+            technical_expert: 'kimi-k2.7-code',
+            devils_advocate: 'deepseek-v4-pro',
+            systems_thinker: 'kimi-k2.6',
+            judge: 'deepseek-v4-pro',
+            synthesis: 'kimi-k2.7-code'
+          }
+        },
+        'openai': {
+          baseUrl: 'https://api.openai.com/v1',
+          apiKeyEnv: 'OPENAI_API_KEY',
+          defaultModels: {
+            technical_expert: 'gpt-5.5',
+            devils_advocate: 'opus-4.8',
+            systems_thinker: 'gemini-3.1-pro',
+            judge: 'gpt-5.5',
+            synthesis: 'gpt-5.5'
+          }
+        }
+      },
+      panel: {
+        technical_expert: {
+          systemPrompt: "You are a Technical Expert coding agent. Focus on correctness, design patterns, security, and performance. Be concise."
+        },
+        devils_advocate: {
+          systemPrompt: "You are a Devil's Advocate coding agent. Challenge assumptions, identify risks, and suggest alternatives. Be critical."
+        },
+        systems_thinker: {
+          systemPrompt: "You are a Systems Thinker coding agent. Focus on integration, interfaces, maintainability, and testing. Holistic view."
+        }
+      },
+      judge: {
+        systemPrompt: "You are the Deliberation Judge. Compare the three panel expert responses. Output ONLY valid JSON containing: consensus (array), contradictions (array), partial_coverage (array), unique_insights (array), and blind_spots (array)."
+      },
+      synthesis: {
+        systemPrompt: "You are the Synthesis Model. Write the final comprehensive response to the user query, grounded strictly in the panel responses and the judge's JSON analysis."
+      }
+    };
+
+    if (choice.startsWith('Quality')) {
+      config.provider = 'openai';
+      ui.notify('Quality / Frontier Preset configured.', 'info');
+    } else if (choice.startsWith('Balanced')) {
+      config.provider = 'opencode-go';
+      ui.notify('Balanced / OpenCode Go Preset configured.', 'info');
+    } else {
+      // Custom Configuration
+      const provider = await ui.select('Select Provider:', ['opencode-go', 'openai']) || 'opencode-go';
+      config.provider = provider;
+
+      const baseUrl = await ui.input('API Base URL:', provider === 'opencode-go' ? 'https://opencode.ai/zen/go/v1' : 'https://api.openai.com/v1');
+      const apiKeyEnv = await ui.input('API Key Env Var name:', provider === 'opencode-go' ? 'OC_GO_CC_API_KEY' : 'OPENAI_API_KEY');
+
+      const technical_expert = await ui.input('Technical Expert Model Name:', 'qwen3.7-plus');
+      const devils_advocate = await ui.input('Devil\'s Advocate Model Name:', 'deepseek-v4-pro');
+      const systems_thinker = await ui.input('Systems Thinker Model Name:', 'glm-5.1');
+      const judge = await ui.input('Judge Model Name:', 'qwen3.7-plus');
+      const synthesis = await ui.input('Synthesis Model Name:', 'qwen3.7-plus');
+
+      config.providers[provider] = {
+        baseUrl,
+        apiKeyEnv,
+        defaultModels: {
+          technical_expert,
+          devils_advocate,
+          systems_thinker,
+          judge,
+          synthesis
+        }
+      };
+
+      ui.notify('Custom configuration completed.', 'info');
+    }
+
+    // Write back to config file
+    const localConfigPath = path.join(process.cwd(), 'pi-harness.config.json');
+    try {
+      fs.writeFileSync(localConfigPath, JSON.stringify(config, null, 2), 'utf8');
+    } catch (err) {
+      ui.notify(`Failed to save config: ${err.message}`, 'error');
+    }
+
+    return config;
+  };
+
   // 1. Register a slash command: /fusion <prompt>
   pi.registerCommand('fusion', {
     description: 'Run multi-model deliberation (Panel -> Judge -> Synthesis)',
@@ -77,6 +186,17 @@ export default function (pi) {
       const prompt = args.join(' ').trim();
       if (!prompt) {
         ctx.ui.notify('Please provide a prompt. Usage: /fusion <your query>', 'error');
+        return;
+      }
+
+      // Check configuration
+      let config = getLocalConfig();
+      if (!config || !config.configured) {
+        config = await configureHarness(ctx.ui);
+      }
+
+      if (!config) {
+        ctx.ui.notify('Harness configuration aborted or failed.', 'error');
         return;
       }
 
@@ -160,11 +280,31 @@ export default function (pi) {
 
       queueMicrotask(async () => {
         try {
+          // Check configuration
+          let config = getLocalConfig();
+          if (!config || !config.configured) {
+            if (activeUi) {
+              config = await configureHarness(activeUi);
+            }
+          }
+
+          if (!config) {
+            throw new Error('Harness configuration aborted or failed.');
+          }
+
           if (options?.onResponse) {
             await options.onResponse({ status: 200, headers: {} }, model);
           }
 
-          const deliberator = getDeliberator();
+          const provider = config.provider || 'opencode-go';
+          const providerConfig = config.providers[provider];
+          
+          const apiClient = new ApiClient({
+            baseUrl: providerConfig.baseUrl,
+            apiKeyEnvVar: providerConfig.apiKeyEnv
+          });
+
+          const deliberator = new Deliberator({ apiClient, config });
           const result = await deliberator.deliberate(prompt);
           const resultText = result.synthesis;
 
@@ -209,6 +349,14 @@ export default function (pi) {
       });
 
       return outer;
+    }
+  });
+
+  // 4. Register a slash command to configure presets and models
+  pi.registerCommand('fusion-config', {
+    description: 'Configure Pi Fusion presets and custom models',
+    handler: async (args, ctx) => {
+      await configureHarness(ctx.ui);
     }
   });
 }
