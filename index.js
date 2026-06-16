@@ -45,11 +45,11 @@ const defaultConfig = {
       baseUrl: 'https://opencode.ai/zen/go/v1',
       apiKeyEnv: 'OC_GO_CC_API_KEY',
       defaultModels: {
-        technical_expert: 'kimi-k2.7-code',
+        technical_expert: 'minimax-m3',
         devils_advocate: 'deepseek-v4-pro',
-        systems_thinker: 'kimi-k2.6',
-        judge: 'deepseek-v4-pro',
-        synthesis: 'kimi-k2.7-code'
+        systems_thinker: 'deepseek-v4-flash',
+        judge: 'qwen3.7-plus',
+        synthesis: 'qwen3.7-plus'
       }
     }
   },
@@ -122,7 +122,8 @@ export default function (pi) {
     
     const choice = await ui.select('Select a deliberation model preset:', [
       'Quality / Frontier (Opus 4.8 + GPT 5.5 + Gemini 3.1 Pro)',
-      'Balanced / OpenCode Go (Gemini 3 Flash + Kimi K2.7 Code + Deepseek V4 Pro)',
+      'OpenCode Go (High Quality: Kimi K2.7 + Qwen 3.7 Plus)',
+      'OpenCode Go (Balanced: MiniMax M3 + DeepSeek V4)',
       'Custom Configuration'
     ]);
 
@@ -151,23 +152,38 @@ export default function (pi) {
         };
       }
       ui.notify('Quality / Frontier Preset configured.', 'info');
-    } else if (choice.startsWith('Balanced')) {
+    } else if (choice.includes('High Quality')) {
       config.provider = 'opencode-go';
-      // Fallback defaults for Balanced preset if not present
       if (!config.providers['opencode-go']) {
         config.providers['opencode-go'] = {
           baseUrl: 'https://opencode.ai/zen/go/v1',
-          apiKeyEnv: 'OC_GO_CC_API_KEY',
-          defaultModels: {
-            technical_expert: 'kimi-k2.7-code',
-            devils_advocate: 'deepseek-v4-pro',
-            systems_thinker: 'kimi-k2.6',
-            judge: 'deepseek-v4-pro',
-            synthesis: 'kimi-k2.7-code'
-          }
+          apiKeyEnv: 'OC_GO_CC_API_KEY'
         };
       }
-      ui.notify('Balanced / OpenCode Go Preset configured.', 'info');
+      config.providers['opencode-go'].defaultModels = {
+        technical_expert: 'kimi-k2.7-code',
+        devils_advocate: 'qwen3.7-plus',
+        systems_thinker: 'kimi-k2.7-code',
+        judge: 'qwen3.7-plus',
+        synthesis: 'qwen3.7-plus'
+      };
+      ui.notify('OpenCode Go (High Quality) Preset configured.', 'info');
+    } else if (choice.includes('Balanced')) {
+      config.provider = 'opencode-go';
+      if (!config.providers['opencode-go']) {
+        config.providers['opencode-go'] = {
+          baseUrl: 'https://opencode.ai/zen/go/v1',
+          apiKeyEnv: 'OC_GO_CC_API_KEY'
+        };
+      }
+      config.providers['opencode-go'].defaultModels = {
+        technical_expert: 'minimax-m3',
+        devils_advocate: 'deepseek-v4-pro',
+        systems_thinker: 'deepseek-v4-flash',
+        judge: 'qwen3.7-plus',
+        synthesis: 'qwen3.7-plus'
+      };
+      ui.notify('OpenCode Go (Balanced) Preset configured.', 'info');
     } else {
       // Custom Configuration
       const auth = getPiAuth();
