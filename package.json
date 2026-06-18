@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node bin/pi-harness.js",
-    "test": "node verify-harness.js"
+    "test": "node verify-harness.js",
+    "verify:stream": "node verify-stream.mjs"
   },
   "keywords": [
     "pi",

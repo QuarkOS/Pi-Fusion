@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import os from 'node:os';
-import { createAssistantMessageEventStream, getProviders, getModels } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, getProviders, getModels, calculateCost } from '@earendil-works/pi-ai';
 import { ApiClient } from './lib/api.js';
 import { Deliberator } from './lib/deliberation.js';
 
@@ -314,43 +314,56 @@ export default function (pi) {
         return;
       }
 
-      ctx.ui.write('\n🧠 **Starting Deliberation Pipeline**\n');
+      // ponytail: ctx.ui has no write()/print() — progress goes to the footer status row
+      // (setStatus), and the final answer is pushed as a custom transcript message. The
+      // default custom-message renderer shows it as a markdown block with no renderer
+      // registration needed (interactive-mode.js -> CustomMessageComponent default path).
+      ctx.ui.setStatus('fusion', '🧠 Starting deliberation pipeline…');
 
       try {
         const deliberator = getDeliberator();
         const result = await deliberator.deliberate(prompt, {
           onProgress: (stage, data) => {
             if (stage === 'panel-start') {
-              ctx.ui.write(` ├─ ⏳ Running parallel panel expert models (${data.models.technical_expert}, ${data.models.devils_advocate}, ${data.models.systems_thinker})...\n`);
+              ctx.ui.setStatus('fusion', `⏳ Panel: ${data.models.technical_expert}, ${data.models.devils_advocate}, ${data.models.systems_thinker}`);
             } else if (stage === 'panel-end') {
-              ctx.ui.write(` ├─ ✅ Expert panel responses received.\n`);
+              ctx.ui.setStatus('fusion', '✅ Panel responses received');
             } else if (stage === 'judge-start') {
-              ctx.ui.write(` ├─ ⚖️ Comparing responses using Deliberation Judge (${data.model})...\n`);
+              ctx.ui.setStatus('fusion', `⚖️ Judge (${data.model})`);
             } else if (stage === 'judge-end') {
-              ctx.ui.write(` ├─ ✅ Deliberation analysis generated.\n`);
+              ctx.ui.setStatus('fusion', '✅ Judge analysis generated');
             } else if (stage === 'synthesis-start') {
-              ctx.ui.write(` ├─ 📝 Synthesizing final grounded response (${data.model})...\n`);
+              ctx.ui.setStatus('fusion', `📝 Synthesis (${data.model})`);
             } else if (stage === 'synthesis-end') {
-              ctx.ui.write(` └─ ✅ Synthesis completed.\n\n---\n\n`);
+              ctx.ui.setStatus('fusion', '✅ Synthesis completed');
             }
           }
         });
 
-        // Write output directly back into the Pi session TUI/editor
-        ctx.ui.write('\n\n--- 🧠 Deliberation Synthesis Answer ---\n\n');
-        ctx.ui.write(result.synthesis);
-        ctx.ui.write('\n\n---------------------------------------\n\n');
+        // Persist the synthesis as a transcript row (display:true renders it even with no
+        // registered renderer). triggerTurn:false so it doesn't re-prompt the agent.
+        pi.sendMessage(
+          { customType: 'fusion-answer', content: result.synthesis, display: true },
+          { triggerTurn: false }
+        );
       } catch (error) {
-        ctx.ui.write(`\n❌ Deliberation failed: ${error.message}\n`);
+        ctx.ui.notify(`Deliberation failed: ${error.message}`, 'error');
+      } finally {
+        ctx.ui.setStatus('fusion', undefined);
       }
     }
   });
 
   // 2. Register a custom agent tool: deliberate
-  // This allows the Pi LLM agent itself to call this tool when solving tasks
-  pi.registerTool('deliberate', {
+  // This allows the Pi LLM agent itself to call this tool when solving tasks.
+  // Returns the synthesis as content (what the agent sees) plus the full panel
+  // responses, judge analysis, models, and usage as structured details.
+  pi.registerTool({
+    name: 'deliberate',
+    label: 'Deliberate',
     description: 'Deliberate on a complex design decision, architectural choice, or coding question using a parallel panel of expert models (Technical, Devil\'s Advocate, Systems Thinker), a Judge, and a Synthesis model.',
-    schema: {
+    promptSnippet: 'Run multi-model deliberation on complex design questions',
+    parameters: {
       type: 'object',
       properties: {
         prompt: {
@@ -360,13 +373,25 @@ export default function (pi) {
       },
       required: ['prompt']
     },
-    execute: async ({ prompt }) => {
+    execute: async (_toolCallId, params) => {
       try {
         const deliberator = getDeliberator();
-        const result = await deliberator.deliberate(prompt);
-        return `DELIBERATION RESULT:\n\n${result.synthesis}`;
+        const result = await deliberator.deliberate(params.prompt);
+        return {
+          content: [{ type: 'text', text: result.synthesis }],
+          details: {
+            judgeAnalysis: result.judgeAnalysis,
+            panelResponses: result.panelResponses,
+            models: result.models,
+            usage: result.usage,
+          },
+        };
       } catch (error) {
-        return `Deliberation failed: ${error.message}`;
+        const msg = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: 'text', text: `Deliberation failed: ${msg}` }],
+          details: { error: msg },
+        };
       }
     }
   });
@@ -412,8 +437,34 @@ export default function (pi) {
         }
       }
 
+      const freshUsage = () => ({
+        input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      });
+      const baseMessage = {
+        role: "assistant",
+        content: [],
+        api: model.api,
+        provider: model.provider,
+        model: model.id,
+        usage: freshUsage(),
+        stopReason: "stop",
+        timestamp: Date.now()
+      };
+      const msg = (text, extra = {}) => {
+        const { usage, ...rest } = extra;
+        return { ...baseMessage, content: [{ type: "text", text }], usage: usage || freshUsage(), ...rest };
+      };
+
       queueMicrotask(async () => {
         try {
+          if (options?.signal?.aborted) {
+            const m = msg("", { stopReason: "aborted", errorMessage: "aborted" });
+            outer.push({ type: "error", reason: "aborted", error: m });
+            outer.end(m);
+            return;
+          }
+
           // Check configuration
           let config = getLocalConfig();
           if (!config || !config.configured) {
@@ -437,25 +488,24 @@ export default function (pi) {
           });
 
           let streamedText = '';
-
           const sendDelta = (text) => {
             streamedText += text;
-            outer.push({ 
-              type: "text_delta", 
-              contentIndex: 0, 
-              delta: text, 
-              partial: { role: "assistant", content: [{ type: "text", text: streamedText }] } 
-            });
+            outer.push({ type: "text_delta", contentIndex: 0, delta: text, partial: msg(streamedText) });
           };
 
-          // Start text block
-          outer.push({ 
-            type: "text_start", 
-            contentIndex: 0, 
-            partial: { role: "assistant", content: [{ type: "text", text: "" }] } 
-          });
+          // pi's consumer (agent-loop.js) drops every delta until it sees a "start" event —
+          // partialMessage is null until "start" sets it, and all delta cases guard on it.
+          // Also each partial must be a full AssistantMessage or downstream usage/cost code
+          // throws. Push start + open the text block before any delta.
+          outer.push({ type: "start", partial: { ...baseMessage, content: [], usage: freshUsage() } });
+          outer.push({ type: "text_start", contentIndex: 0, partial: msg("") });
 
           sendDelta('🧠 **Starting Deliberation Pipeline**\n');
+
+          // Track whether synthesis tokens streamed live. If the synthesis call retries,
+          // ApiClient drops onDelta to avoid duplicating partial tokens the caller already
+          // saw; in that case the full synthesis is sent as one blob on synthesis-end.
+          let synthesisStreamed = false;
 
           const deliberator = new Deliberator({ apiClient, config });
           const result = await deliberator.deliberate(prompt, {
@@ -469,42 +519,47 @@ export default function (pi) {
               } else if (stage === 'judge-end') {
                 sendDelta(` ├─ ✅ Deliberation analysis generated.\n`);
               } else if (stage === 'synthesis-start') {
-                sendDelta(` ├─ 📝 Synthesizing final grounded response (${data.model})...\n`);
+                sendDelta(` ├─ 📝 Synthesizing final grounded response (${data.model})...\n\n`);
               } else if (stage === 'synthesis-end') {
-                sendDelta(` └─ ✅ Synthesis completed.\n\n---\n\n`);
+                // Retry fallback: if synthesis didn't stream live, send it as one blob.
+                if (!synthesisStreamed && data.synthesis) {
+                  sendDelta(data.synthesis);
+                }
+                sendDelta('\n\n---\n\n');
               }
+            },
+            onSynthesisDelta: (delta) => {
+              synthesisStreamed = true;
+              sendDelta(delta);
             }
           });
 
-          const resultText = result.synthesis;
+          if (options?.signal?.aborted) {
+            const m = msg(streamedText, { stopReason: "aborted", errorMessage: "aborted" });
+            outer.push({ type: "error", reason: "aborted", error: m });
+            outer.end(m);
+            return;
+          }
 
-          // Send the final synthesis content
-          sendDelta(resultText);
+          // Real accumulated usage from all 5 LLM calls. calculateCost mutates usage.cost
+          // in place using the fusion model's cost rates. Token counts are real; cost is
+          // zero unless the model definition has non-zero cost rates.
+          const finalUsage = result.usage || freshUsage();
+          try {
+            calculateCost(model, finalUsage);
+          } catch {
+            // calculateCost optional; if it throws, keep raw token counts with zero cost
+          }
 
-          // End text block
-          outer.push({ type: "text_end", contentIndex: 0, content: streamedText, partial: { role: "assistant", content: [{ type: "text", text: streamedText }] } });
-
-          // Complete message
-          const finalMessage = {
-            role: "assistant",
-            content: [
-              { type: "text", text: streamedText }
-            ],
-            stopReason: "stop"
-          };
+          outer.push({ type: "text_end", contentIndex: 0, content: streamedText, partial: msg(streamedText, { usage: finalUsage }) });
+          const finalMessage = msg(streamedText, { usage: finalUsage });
           outer.push({ type: "done", reason: "stop", message: finalMessage });
           outer.end(finalMessage);
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
-          const finalMessage = {
-            role: "assistant",
-            content: [
-              { type: "text", text: `Error running deliberation: ${errMsg}` }
-            ],
-            stopReason: "error"
-          };
-          outer.push({ type: "error", reason: "error", error: finalMessage });
-          outer.end(finalMessage);
+          const m = msg(`Error running deliberation: ${errMsg}`, { stopReason: "error", errorMessage: errMsg });
+          outer.push({ type: "error", reason: "error", error: m });
+          outer.end(m);
         }
       });
 
