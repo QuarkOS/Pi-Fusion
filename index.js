@@ -76,6 +76,24 @@ const defaultConfig = {
   }
 };
 
+// OpenAI tool definition for the `write` tool — sent to the file-agent model so it can
+// emit structured write tool calls. Matches Pi's built-in write tool schema.
+const WRITE_TOOL = [{
+  type: 'function',
+  function: {
+    name: 'write',
+    description: 'Write content to a file. Create one file per tool call. Use relative paths from the project root.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Path to the file to write (relative or absolute)' },
+        content: { type: 'string', description: 'Full content to write to the file' }
+      },
+      required: ['path', 'content']
+    }
+  }
+}];
+
 /**
  * Pi Coding Agent extension entry point.
  * Ref: https://pi.dev/docs/extensions
@@ -484,9 +502,56 @@ export default function (pi) {
         const { usage, ...rest } = extra;
         return { ...baseMessage, content: [{ type: "text", text }], usage: usage || freshUsage(), ...rest };
       };
+      const addUsageSafe = (total, u) => {
+        if (!u) return;
+        total.input += u.input || 0;
+        total.output += u.output || 0;
+        total.cacheRead += u.cacheRead || 0;
+        total.cacheWrite += u.cacheWrite || 0;
+        total.totalTokens += u.totalTokens || 0;
+      };
 
       queueMicrotask(async () => {
         try {
+          // Follow-up short-circuit: after we emit write tool call(s), Pi executes them and
+          // calls us back with toolResult(s). Don't re-deliberate — confirm the saves and stop.
+          // Handles 1 or N tool results (multi-file). Find the paths from the preceding
+          // assistant message's toolCall blocks matching the toolCallIds.
+          const msgs = context.messages || [];
+          // Collect trailing write toolResults (they may be 1 or many, contiguous at the end).
+          const writeResults = [];
+          for (let i = msgs.length - 1; i >= 0; i--) {
+            const m = msgs[i];
+            if (m && m.role === 'toolResult' && m.toolName === 'write') writeResults.unshift(m);
+            else break;
+          }
+          if (writeResults.length > 0) {
+            // Find the assistant message just before the first toolResult — it has our toolCalls.
+            const firstResultIdx = msgs.length - writeResults.length - 1;
+            const assistantMsg = msgs[firstResultIdx];
+            const savedPaths = [];
+            for (const wr of writeResults) {
+              let path = '';
+              if (assistantMsg && Array.isArray(assistantMsg.content)) {
+                const tc = assistantMsg.content.find(c => c.type === 'toolCall' && c.id === wr.toolCallId);
+                if (tc && tc.arguments && tc.arguments.path) path = tc.arguments.path;
+              }
+              savedPaths.push(path);
+            }
+            const known = savedPaths.filter(Boolean);
+            const confirmText = known.length > 0
+              ? `✅ Saved ${known.length} file${known.length > 1 ? 's' : ''}:\n` + known.map(p => `  • \`${p}\``).join('\n')
+              : `✅ Saved ${writeResults.length} file${writeResults.length > 1 ? 's' : ''}.`;
+            outer.push({ type: "start", partial: { ...baseMessage, content: [], usage: freshUsage() } });
+            outer.push({ type: "text_start", contentIndex: 0, partial: msg("") });
+            outer.push({ type: "text_delta", contentIndex: 0, delta: confirmText, partial: msg(confirmText) });
+            outer.push({ type: "text_end", contentIndex: 0, content: confirmText, partial: msg(confirmText) });
+            const done = msg(confirmText);
+            outer.push({ type: "done", reason: "stop", message: done });
+            outer.end(done);
+            return;
+          }
+
           if (options?.signal?.aborted) {
             const m = msg("", { stopReason: "aborted", errorMessage: "aborted" });
             outer.push({ type: "error", reason: "aborted", error: m });
@@ -574,19 +639,61 @@ export default function (pi) {
             return;
           }
 
-          // Real accumulated usage from all 5 LLM calls. calculateCost mutates usage.cost
-          // in place using the fusion model's cost rates. Token counts are real; cost is
-          // zero unless the model definition has non-zero cost rates.
+          // Real accumulated usage from the deliberation calls.
           const finalUsage = result.usage || freshUsage();
+
+          outer.push({ type: "text_end", contentIndex: 0, content: streamedText, partial: msg(streamedText, { usage: finalUsage }) });
+
+          // File-agent step: hand the synthesis to deepseek-v4-flash (cheap, near-unlimited
+          // usage on OpenCode Go) with the `write` tool. It decides what to save — one file,
+          // many files, or nothing — and emits structured tool calls that Pi executes on disk.
+          // This replaces the old single-code-block heuristic and handles multi-file uniformly.
+          const fileAgentModel = config.fileAgentModel || 'deepseek-v4-flash';
+          let fileAgentResult;
+          try {
+            fileAgentResult = await apiClient.chatCompletion({
+              model: fileAgentModel,
+              temperature: 0.2,
+              messages: [
+                { role: 'system', content: 'You are a file-saving agent. You receive a deliberation synthesis that may contain code, files, or project structure. Use the write tool to save every file the user would expect from the original request. Choose sensible filenames inferred from the request and the code\'s language. If the synthesis contains no files to save (e.g. it is a conceptual answer), do NOT call any tool — just reply with a brief one-line acknowledgment. Never explain at length; either call write tool(s) or give a one-line confirmation.' },
+                { role: 'user', content: `Original user request: ${prompt}\n\nDeliberation synthesis:\n${result.synthesis}\n\nSave the file(s) now using the write tool, or confirm if nothing needs saving.` }
+              ],
+              tools: WRITE_TOOL,
+              onDelta: (delta) => { if (delta) sendDelta(delta); },
+            });
+          } catch (fileErr) {
+            // File-agent failed — finish with the synthesis as plain text (files not saved).
+            const eMsg = fileErr instanceof Error ? fileErr.message : String(fileErr);
+            const finalMessage = msg(streamedText + `\n\n⚠️ File agent skipped: ${eMsg}`, { usage: finalUsage });
+            outer.push({ type: "done", reason: "stop", message: finalMessage });
+            outer.end(finalMessage);
+            return;
+          }
+          addUsageSafe(finalUsage, fileAgentResult.usage);
+
+          // calculateCost after all tokens accumulated (deliberation + file agent). Mutates
+          // usage.cost in place using the fusion model's cost rates. Token counts are real;
+          // cost is zero unless the model definition has non-zero cost rates.
           try {
             calculateCost(model, finalUsage);
           } catch {
             // calculateCost optional; if it throws, keep raw token counts with zero cost
           }
 
-          outer.push({ type: "text_end", contentIndex: 0, content: streamedText, partial: msg(streamedText, { usage: finalUsage }) });
-          const finalMessage = msg(streamedText, { usage: finalUsage });
-          outer.push({ type: "done", reason: "stop", message: finalMessage });
+          // Emit each tool call from the file agent as a proper toolcall block.
+          const toolCalls = fileAgentResult.toolCalls || [];
+          const contentBlocks = [{ type: "text", text: streamedText }];
+          for (let i = 0; i < toolCalls.length; i++) {
+            const tc = toolCalls[i];
+            const tcBlock = { type: "toolCall", id: tc.id || `call_${Date.now()}_${i}`, name: tc.name, arguments: tc.arguments };
+            contentBlocks.push(tcBlock);
+            outer.push({ type: "toolcall_start", contentIndex: 1 + i, partial: { ...baseMessage, content: [...contentBlocks], usage: finalUsage, stopReason: "toolUse" } });
+            outer.push({ type: "toolcall_end", contentIndex: 1 + i, toolCall: tcBlock, partial: { ...baseMessage, content: [...contentBlocks], usage: finalUsage, stopReason: "toolUse" } });
+          }
+
+          const stopReason = toolCalls.length > 0 ? "toolUse" : "stop";
+          const finalMessage = { ...baseMessage, content: contentBlocks, usage: finalUsage, stopReason };
+          outer.push({ type: "done", reason: stopReason, message: finalMessage });
           outer.end(finalMessage);
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);

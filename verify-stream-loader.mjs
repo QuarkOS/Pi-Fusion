@@ -1,8 +1,8 @@
-// ESM loader hook for verify-stream.mjs: redirects the two dependencies that would
-// trigger real I/O / require the not-installed pi-ai peer dep to inline stub modules.
+// ESM loader hook for verify-stream.mjs: redirects dependencies to inline stub modules
+// so the test runs with no network and no pi-ai peer dep.
 // - @earendil-works/pi-ai  -> minimal faithful AssistantMessageEventStream replica
 // - ./lib/deliberation.js  -> Deliberator stub that drives onProgress + returns a synthesis
-// ./lib/api.js loads for real (node builtins only); its constructor only prints a warning.
+// - ./lib/api.js           -> ApiClient stub: returns canned content/usage/toolCalls
 
 const PI_AI_SOURCE = `
 export function createAssistantMessageEventStream() {
@@ -56,6 +56,10 @@ export class Deliberator {
     const onSynthesisDelta = options.onSynthesisDelta || (() => {});
     const mode = options.mode || this.opts?.config?.mode || '5x';
     const models = { technical_expert: 'te', devils_advocate: 'da', systems_thinker: 'st', judge: 'j', synthesis: 'sy' };
+    const withHtml = String(prompt).startsWith('HTML:');
+    const synthesis = withHtml
+      ? 'Here is the file:\\n\\n\`\`\`html\\n<!DOCTYPE html><html></html>\\n\`\`\`\\n'
+      : 'TEST SYNTHESIS\\n\\nFinal answer.';
     onProgress('panel-start', {
       models: { technical_expert: models.technical_expert, devils_advocate: models.devils_advocate, systems_thinker: mode === '3x' ? models.synthesis : models.systems_thinker },
       mode
@@ -66,10 +70,11 @@ export class Deliberator {
       onProgress('judge-end', { judgeAnalysis: { consensus: [], contradictions: [], partial_coverage: [], unique_insights: [], blind_spots: [] } });
     }
     onProgress('synthesis-start', { model: models.synthesis });
-    for (const tok of ['TEST ', 'SYNTHESIS', '\\n\\n', 'Final ', 'answer.']) onSynthesisDelta(tok);
-    onProgress('synthesis-end', { synthesis: 'TEST SYNTHESIS\\n\\nFinal answer.' });
+    if (withHtml) onSynthesisDelta(synthesis); else
+      for (const tok of ['TEST ', 'SYNTHESIS', '\\n\\n', 'Final ', 'answer.']) onSynthesisDelta(tok);
+    onProgress('synthesis-end', { synthesis });
     return {
-      synthesis: 'TEST SYNTHESIS\\n\\nFinal answer.',
+      synthesis,
       judgeAnalysis: mode === '3x' ? null : { consensus: [], contradictions: [], partial_coverage: [], unique_insights: [], blind_spots: [] },
       panelResponses: { technical_expert: 't', devils_advocate: 'd', systems_thinker: mode === '3x' ? '' : 's' },
       models,
@@ -80,12 +85,47 @@ export class Deliberator {
 }
 `;
 
+const API_SOURCE = `
+export class ApiClient {
+  constructor(opts) { this.opts = opts; this.callCount = 0; }
+  async chatCompletion({ model, messages, onDelta, tools }) {
+    this.callCount++;
+    // The file-agent call (has tools) returns canned write tool calls. The multi-file case
+    // is triggered by 'MULTI:' in the prompt; single-file by anything else; no-file by 'NONE:'.
+    const userText = JSON.stringify(messages).toLowerCase();
+    if (tools && tools.length > 0) {
+      if (userText.includes('none:')) {
+        if (onDelta) onDelta('Nothing to save.');
+        return { content: 'Nothing to save.', usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { input:0, output:0, cacheRead:0, cacheWrite:0, total:0 } }, toolCalls: [] };
+      }
+      if (userText.includes('multi:')) {
+        return { content: '', usage: { input: 20, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 30, cost: { input:0, output:0, cacheRead:0, cacheWrite:0, total:0 } },
+          toolCalls: [
+            { id: 'call_a', name: 'write', arguments: { path: 'index.html', content: '<html>a</html>' } },
+            { id: 'call_b', name: 'write', arguments: { path: 'style.css', content: 'body{}' } },
+          ] };
+      }
+      return { content: '', usage: { input: 15, output: 8, cacheRead: 0, cacheWrite: 0, totalTokens: 23, cost: { input:0, output:0, cacheRead:0, cacheWrite:0, total:0 } },
+        toolCalls: [{ id: 'call_solo', name: 'write', arguments: { path: 'water-simulation.html', content: '<!DOCTYPE html><html></html>' } }] };
+    }
+    // Panel/judge/synthesis calls (no tools): return canned content.
+    const content = 'CANNED RESPONSE';
+    if (onDelta) onDelta(content);
+    return { content, usage: { input: 30, output: 15, cacheRead: 0, cacheWrite: 0, totalTokens: 45, cost: { input:0, output:0, cacheRead:0, cacheWrite:0, total:0 } }, toolCalls: [] };
+  }
+  async testConnection() { return true; }
+}
+`;
+
 export async function resolve(specifier, context, nextResolve) {
   if (specifier === '@earendil-works/pi-ai') {
     return { url: 'data:text/javascript,' + encodeURIComponent(PI_AI_SOURCE), shortCircuit: true };
   }
   if (specifier === './lib/deliberation.js') {
     return { url: 'data:text/javascript,' + encodeURIComponent(DELIB_SOURCE), shortCircuit: true };
+  }
+  if (specifier === './lib/api.js') {
+    return { url: 'data:text/javascript,' + encodeURIComponent(API_SOURCE), shortCircuit: true };
   }
   return nextResolve(specifier, context);
 }
