@@ -54,19 +54,25 @@ export class Deliberator {
   async deliberate(prompt, options = {}) {
     const onProgress = options.onProgress || (() => {});
     const onSynthesisDelta = options.onSynthesisDelta || (() => {});
-    onProgress('panel-start', { models: { technical_expert: 'te', devils_advocate: 'da', systems_thinker: 'st' } });
-    onProgress('panel-end', { panelResponses: { technical_expert: 't', devils_advocate: 'd', systems_thinker: 's' } });
-    onProgress('judge-start', { model: 'j' });
-    onProgress('judge-end', { judgeAnalysis: { consensus: [], contradictions: [], partial_coverage: [], unique_insights: [], blind_spots: [] } });
-    onProgress('synthesis-start', { model: 'sy' });
-    // Stream synthesis tokens live via onSynthesisDelta (the improvement we're testing)
+    const mode = options.mode || this.opts?.config?.mode || '5x';
+    const models = { technical_expert: 'te', devils_advocate: 'da', systems_thinker: 'st', judge: 'j', synthesis: 'sy' };
+    onProgress('panel-start', {
+      models: { technical_expert: models.technical_expert, devils_advocate: models.devils_advocate, systems_thinker: mode === '3x' ? models.synthesis : models.systems_thinker },
+      mode
+    });
+    onProgress('panel-end', { panelResponses: { technical_expert: 't', devils_advocate: 'd', systems_thinker: mode === '3x' ? '' : 's' } });
+    if (mode !== '3x') {
+      onProgress('judge-start', { model: models.judge });
+      onProgress('judge-end', { judgeAnalysis: { consensus: [], contradictions: [], partial_coverage: [], unique_insights: [], blind_spots: [] } });
+    }
+    onProgress('synthesis-start', { model: models.synthesis });
     for (const tok of ['TEST ', 'SYNTHESIS', '\\n\\n', 'Final ', 'answer.']) onSynthesisDelta(tok);
     onProgress('synthesis-end', { synthesis: 'TEST SYNTHESIS\\n\\nFinal answer.' });
     return {
       synthesis: 'TEST SYNTHESIS\\n\\nFinal answer.',
-      judgeAnalysis: { consensus: [], contradictions: [], partial_coverage: [], unique_insights: [], blind_spots: [] },
-      panelResponses: { technical_expert: 't', devils_advocate: 'd', systems_thinker: 's' },
-      models: { technical_expert: 'te', devils_advocate: 'da', systems_thinker: 'st', judge: 'j', synthesis: 'sy' },
+      judgeAnalysis: mode === '3x' ? null : { consensus: [], contradictions: [], partial_coverage: [], unique_insights: [], blind_spots: [] },
+      panelResponses: { technical_expert: 't', devils_advocate: 'd', systems_thinker: mode === '3x' ? '' : 's' },
+      models,
       usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, totalTokens: 150,
                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }
     };

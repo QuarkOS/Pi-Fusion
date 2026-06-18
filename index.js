@@ -41,16 +41,19 @@ const isProviderConnected = (provider, auth) => {
 const defaultConfig = {
   configured: true,
   provider: 'opencode-go',
+  // 3x GLM-5.2 fusion is the out-of-the-box "best" OpenCode Go mode: 3 LLM calls,
+  // all glm-5.2 (1M context, coding/agent SOTA). Switch via /fusion-config to override.
+  mode: '3x',
   providers: {
     'opencode-go': {
       baseUrl: 'https://opencode.ai/zen/go/v1',
       apiKeyEnv: 'OC_GO_CC_API_KEY',
       defaultModels: {
-        technical_expert: 'minimax-m3',
-        devils_advocate: 'deepseek-v4-pro',
-        systems_thinker: 'deepseek-v4-flash',
-        judge: 'qwen3.7-plus',
-        synthesis: 'qwen3.7-plus'
+        technical_expert: 'glm-5.2',
+        devils_advocate: 'glm-5.2',
+        systems_thinker: 'glm-5.2',
+        judge: 'glm-5.2',
+        synthesis: 'glm-5.2'
       }
     }
   },
@@ -122,6 +125,7 @@ export default function (pi) {
     if (!ui) return null;
     
     const choice = await ui.select('Select a deliberation model preset:', [
+      'GLM-5.2 Fusion (Best · 3x · OpenCode Go)',
       'Quality / Frontier (Opus 4.8 + GPT 5.5 + Gemini 3.1 Pro)',
       'OpenCode Go (High Quality: Kimi K2.7 + Qwen 3.7 Plus)',
       'OpenCode Go (Balanced: MiniMax M3 + DeepSeek V4)',
@@ -130,13 +134,34 @@ export default function (pi) {
 
     let config = getLocalConfig();
     config.configured = true;
+    // Default to full 5-call pipeline; the GLM-5.2 preset overrides to '3x' below.
+    config.mode = '5x';
 
     // Ensure providers object exists
     if (!config.providers) {
       config.providers = {};
     }
 
-    if (choice.startsWith('Quality')) {
+    if (choice.startsWith('GLM-5.2')) {
+      // 3x GLM-5.2 fusion: 2 parallel experts + 1 synthesizer (3 LLM calls total),
+      // all glm-5.2. The synthesizer absorbs the Judge + Systems Thinker roles.
+      config.provider = 'opencode-go';
+      config.mode = '3x';
+      if (!config.providers['opencode-go']) {
+        config.providers['opencode-go'] = {
+          baseUrl: 'https://opencode.ai/zen/go/v1',
+          apiKeyEnv: 'OC_GO_CC_API_KEY'
+        };
+      }
+      config.providers['opencode-go'].defaultModels = {
+        technical_expert: 'glm-5.2',
+        devils_advocate: 'glm-5.2',
+        systems_thinker: 'glm-5.2',
+        judge: 'glm-5.2',
+        synthesis: 'glm-5.2'
+      };
+      ui.notify('GLM-5.2 Fusion (Best · 3x) Preset configured.', 'info');
+    } else if (choice.startsWith('Quality')) {
       config.provider = 'openai';
       // Fallback defaults for Quality preset if not present
       if (!config.providers.openai) {
@@ -325,7 +350,11 @@ export default function (pi) {
         const result = await deliberator.deliberate(prompt, {
           onProgress: (stage, data) => {
             if (stage === 'panel-start') {
-              ctx.ui.setStatus('fusion', `⏳ Panel: ${data.models.technical_expert}, ${data.models.devils_advocate}, ${data.models.systems_thinker}`);
+              if (data.mode === '3x') {
+                ctx.ui.setStatus('fusion', `⏳ 3x ${data.models.technical_expert}: 2 experts + synthesizer`);
+              } else {
+                ctx.ui.setStatus('fusion', `⏳ Panel: ${data.models.technical_expert}, ${data.models.devils_advocate}, ${data.models.systems_thinker}`);
+              }
             } else if (stage === 'panel-end') {
               ctx.ui.setStatus('fusion', '✅ Panel responses received');
             } else if (stage === 'judge-start') {
@@ -511,7 +540,11 @@ export default function (pi) {
           const result = await deliberator.deliberate(prompt, {
             onProgress: (stage, data) => {
               if (stage === 'panel-start') {
-                sendDelta(` ├─ ⏳ Running parallel panel expert models (${data.models.technical_expert}, ${data.models.devils_advocate}, ${data.models.systems_thinker})...\n`);
+                if (data.mode === '3x') {
+                  sendDelta(` ├─ ⏳ 3x ${data.models.technical_expert}: running 2 parallel experts + synthesizer...\n`);
+                } else {
+                  sendDelta(` ├─ ⏳ Running parallel panel expert models (${data.models.technical_expert}, ${data.models.devils_advocate}, ${data.models.systems_thinker})...\n`);
+                }
               } else if (stage === 'panel-end') {
                 sendDelta(` ├─ ✅ Expert panel responses received.\n`);
               } else if (stage === 'judge-start') {

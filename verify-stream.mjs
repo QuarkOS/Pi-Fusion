@@ -71,6 +71,12 @@ try {
   //    should only appear split across the 5 token deltas, never as one delta.
   assert.ok(!deltas.some(d => d.delta === 'TEST SYNTHESIS\n\nFinal answer.'), 'synthesis not duplicated as blob');
 
+  // 6b. 3x mode (the default config now): no Judge tier progress deltas, and the panel
+  //     header reflects 3x. The stub skips judge-start/judge-end when mode==='3x'.
+  assert.ok(!deltas.some(d => d.delta.includes('Deliberation Judge')), '3x mode: no judge progress delta');
+  assert.ok(deltas.some(d => d.delta.includes('3x') && d.delta.includes('2 parallel experts')), '3x panel header present');
+  assert.equal(last.message.usage.input, 100, 'usage accumulated in 3x');
+
   assert.ok(onResponseCalled, 'onResponse callback invoked');
 
   // 7. real usage: the final message must carry the accumulated token counts from the
@@ -90,7 +96,21 @@ try {
   assert.equal(evs2[0]?.type, 'error', 'aborted stream must start with error');
   assert.equal(evs2[0]?.reason, 'aborted');
 
-  console.log(`verify-stream: OK — ${evs.length} events (${deltas.length} deltas, ${synthDeltas.length} synthesis), usage=${last.message.usage.totalTokens}t cost=$${last.message.usage.cost.total.toFixed(6)}, abort OK`);
+  // 9. mode branching: 3x skips the Judge tier, 5x emits it. Directly exercise the
+  //    Deliberator (stubbed) with each mode and capture the onProgress stage sequence.
+  const { Deliberator } = await import('./lib/deliberation.js');
+  const stages = (mode) => {
+    const seen = [];
+    const d = new Deliberator({ config: { mode, providers: { 'opencode-go': { defaultModels: {} } } } });
+    return d.deliberate('x', { onProgress: (s) => seen.push(s) }).then(() => seen);
+  };
+  const s3 = await stages('3x');
+  assert.ok(!s3.includes('judge-start') && !s3.includes('judge-end'), '3x: no judge stages');
+  assert.ok(s3.includes('panel-start') && s3.includes('synthesis-end'), '3x: panel + synthesis stages present');
+  const s5 = await stages('5x');
+  assert.ok(s5.includes('judge-start') && s5.includes('judge-end'), '5x: judge stages present');
+
+  console.log(`verify-stream: OK — ${evs.length} events (${deltas.length} deltas, ${synthDeltas.length} synthesis), usage=${last.message.usage.totalTokens}t cost=$${last.message.usage.cost.total.toFixed(6)}, 3x+5x mode OK, abort OK`);
 } finally {
   console.warn = origWarn;
 }

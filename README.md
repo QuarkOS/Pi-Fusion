@@ -50,6 +50,9 @@ A comparison model (`qwen3.7-plus`) reviews the panel responses to find agreemen
 ### Tier 3: Synthesis (Final Grounded Answer)
 A final model (`qwen3.7-plus`) synthesizes the user query, the panel responses, and the Judge's structured JSON analysis into a comprehensive markdown answer.
 
+### 3x mode (cheap, single-model fusion)
+The default out-of-the-box mode is the **GLM-5.2 Fusion (Best · 3x)** preset: all roles use `glm-5.2` (1M context, open-weight coding/agent SOTA) and the pipeline collapses to **3 LLM calls** instead of 5 — 2 parallel experts (Technical + Devil's Advocate) followed by 1 synthesizer that absorbs the Judge + Systems Thinker roles. This cuts cost ~40% vs the full 5-call pipeline while keeping the deliberation value. Switch presets with `/fusion-config` (or `pi-harness --setup`) to return to the full 5-call panel→judge→synthesis flow.
+
 ---
 
 ## Configuration and Setup

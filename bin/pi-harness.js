@@ -82,19 +82,41 @@ function askQuestion(query) {
 async function runSetupWizard(configPath) {
   console.log(chalk.bold.cyan('\n⚙️  Pi Fusion Configuration Wizard'));
   console.log('Select a deliberation model preset:');
-  console.log(`[1] ${chalk.bold.yellow('Quality / Frontier')} (Opus 4.8 + GPT 5.5 + Gemini 3.1 Pro)`);
-  console.log(`[2] ${chalk.bold.green('Balanced / OpenCode Go')} (Gemini 3 Flash + Kimi K2.7 Code + Deepseek V4 Pro)`);
-  console.log(`[3] ${chalk.bold.blue('Custom Configuration')}`);
+  console.log(`[1] ${chalk.bold.magenta('GLM-5.2 Fusion (Best)')} (3x · OpenCode Go · 1M context)`);
+  console.log(`[2] ${chalk.bold.yellow('Quality / Frontier')} (Opus 4.8 + GPT 5.5 + Gemini 3.1 Pro)`);
+  console.log(`[3] ${chalk.bold.green('Balanced / OpenCode Go')} (Gemini 3 Flash + Kimi K2.7 Code + Deepseek V4 Pro)`);
+  console.log(`[4] ${chalk.bold.blue('Custom Configuration')}`);
 
   let choice = '';
-  while (choice !== '1' && choice !== '2' && choice !== '3') {
-    choice = await askQuestion('\nChoose preset [1-3]: ');
+  while (!['1', '2', '3', '4'].includes(choice)) {
+    choice = await askQuestion('\nChoose preset [1-4]: ');
   }
 
   let config = loadConfig(configPath);
   config.configured = true;
+  config.mode = '5x';
 
   if (choice === '1') {
+    // 3x GLM-5.2 fusion: 2 parallel experts + 1 synthesizer (3 LLM calls total), all glm-5.2.
+    config.provider = 'opencode-go';
+    config.mode = '3x';
+    if (!config.providers) config.providers = {};
+    if (!config.providers['opencode-go']) {
+      config.providers['opencode-go'] = {
+        baseUrl: 'https://opencode.ai/zen/go/v1',
+        apiKeyEnvVar: 'OC_GO_CC_API_KEY',
+        defaultModels: {}
+      };
+    }
+    config.providers['opencode-go'].defaultModels = {
+      technical_expert: 'glm-5.2',
+      devils_advocate: 'glm-5.2',
+      systems_thinker: 'glm-5.2',
+      judge: 'glm-5.2',
+      synthesis: 'glm-5.2'
+    };
+    console.log(chalk.green('\n✓ GLM-5.2 Fusion (Best · 3x) Preset configured.'));
+  } else if (choice === '2') {
     config.provider = 'openai';
     if (!config.providers) config.providers = {};
     if (!config.providers.openai) {
@@ -112,7 +134,7 @@ async function runSetupWizard(configPath) {
       synthesis: 'gpt-5.5'
     };
     console.log(chalk.green('\n✓ Quality / Frontier Preset configured.'));
-  } else if (choice === '2') {
+  } else if (choice === '3') {
     config.provider = 'opencode-go';
     if (!config.providers) config.providers = {};
     if (!config.providers['opencode-go']) {
