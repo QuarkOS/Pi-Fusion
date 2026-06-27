@@ -146,7 +146,7 @@ export default function (pi) {
       'GLM-5.2 Fusion (Best · 3x · OpenCode Go)',
       'Quality / Frontier (Opus 4.8 + GPT 5.5 + Gemini 3.1 Pro)',
       'OpenCode Go (High Quality: Kimi K2.7 + Qwen 3.7 Plus)',
-      'OpenCode Go (Balanced: MiniMax M3 + DeepSeek V4)',
+      'OpenCode Go (Balanced: Kimi K2.7 + DeepSeek V4 + Kimi K2.6)',
       'Custom Configuration'
     ]);
 
@@ -221,11 +221,11 @@ export default function (pi) {
         };
       }
       config.providers['opencode-go'].defaultModels = {
-        technical_expert: 'minimax-m3',
+        technical_expert: 'kimi-k2.7-code',
         devils_advocate: 'deepseek-v4-pro',
-        systems_thinker: 'deepseek-v4-flash',
-        judge: 'qwen3.7-plus',
-        synthesis: 'qwen3.7-plus'
+        systems_thinker: 'kimi-k2.6',
+        judge: 'deepseek-v4-pro',
+        synthesis: 'kimi-k2.7-code'
       };
       ui.notify('OpenCode Go (Balanced) Preset configured.', 'info');
     } else {

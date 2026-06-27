@@ -1,6 +1,6 @@
 {
   "name": "@quarkos/pi-fusion",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Multi-model deliberation harness (OpenRouter Fusion pattern) for OpenCode Go",
   "main": "index.js",
   "type": "module",

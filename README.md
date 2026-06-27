@@ -35,12 +35,12 @@ The deliberation pipeline consists of three sequential stages:
 
 ### Tier 1: Panel (Parallel Execution)
 The user query is sent to three separate expert models in parallel:
-* **Technical Expert** (`qwen3.7-plus`): Evaluates correctness, architectural patterns, performance, and security.
+* **Technical Expert** (`kimi-k2.7-code`): Evaluates correctness, architectural patterns, performance, and security.
 * **Devil's Advocate** (`deepseek-v4-pro`): Challenges assumptions, identifies edge cases, highlights risks, and evaluates simpler alternatives.
-* **Systems Thinker** (`glm-5.1`): Focuses on integration, API design, testing strategies, long-term technical debt, and maintainability.
+* **Systems Thinker** (`kimi-k2.6`): Focuses on integration, API design, testing strategies, long-term technical debt, and maintainability.
 
 ### Tier 2: Judge (Deliberative Analysis)
-A comparison model (`qwen3.7-plus`) reviews the panel responses to find agreements and conflicts. It produces a structured JSON output with five keys:
+A comparison model (`deepseek-v4-pro`) reviews the panel responses to find agreements and conflicts. It produces a structured JSON output with five keys:
 * `consensus`: Core technical decisions where the experts agree.
 * `contradictions`: Specific design conflicts or tradeoffs.
 * `partial_coverage`: Points raised by some but not all models.
@@ -48,7 +48,7 @@ A comparison model (`qwen3.7-plus`) reviews the panel responses to find agreemen
 * `blind_spots`: Critical omissions or risks that none of the models addressed.
 
 ### Tier 3: Synthesis (Final Grounded Answer)
-A final model (`qwen3.7-plus`) synthesizes the user query, the panel responses, and the Judge's structured JSON analysis into a comprehensive markdown answer.
+A final model (`kimi-k2.7-code`) synthesizes the user query, the panel responses, and the Judge's structured JSON analysis into a comprehensive markdown answer.
 
 ### 3x mode (cheap, single-model fusion)
 The default out-of-the-box mode is the **GLM-5.2 Fusion (Best · 3x)** preset: all roles use `glm-5.2` (1M context, open-weight coding/agent SOTA) and the pipeline collapses to **3 LLM calls** instead of 5 — 2 parallel experts (Technical + Devil's Advocate) followed by 1 synthesizer that absorbs the Judge + Systems Thinker roles. This cuts cost ~40% vs the full 5-call pipeline while keeping the deliberation value. Switch presets with `/fusion-config` (or `pi-harness --setup`) to return to the full 5-call panel→judge→synthesis flow.

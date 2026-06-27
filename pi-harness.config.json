@@ -6,11 +6,11 @@
       "baseUrl": "https://opencode.ai/zen/go/v1",
       "apiKeyEnv": "OC_GO_CC_API_KEY",
       "defaultModels": {
-        "technical_expert": "minimax-m3",
+        "technical_expert": "kimi-k2.7-code",
         "devils_advocate": "deepseek-v4-pro",
-        "systems_thinker": "deepseek-v4-flash",
-        "judge": "qwen3.7-plus",
-        "synthesis": "qwen3.7-plus"
+        "systems_thinker": "kimi-k2.6",
+        "judge": "deepseek-v4-pro",
+        "synthesis": "kimi-k2.7-code"
       }
     },
     "openai": {

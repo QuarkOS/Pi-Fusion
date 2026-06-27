@@ -84,7 +84,7 @@ async function runSetupWizard(configPath) {
   console.log('Select a deliberation model preset:');
   console.log(`[1] ${chalk.bold.magenta('GLM-5.2 Fusion (Best)')} (3x · OpenCode Go · 1M context)`);
   console.log(`[2] ${chalk.bold.yellow('Quality / Frontier')} (Opus 4.8 + GPT 5.5 + Gemini 3.1 Pro)`);
-  console.log(`[3] ${chalk.bold.green('Balanced / OpenCode Go')} (Gemini 3 Flash + Kimi K2.7 Code + Deepseek V4 Pro)`);
+  console.log(`[3] ${chalk.bold.green('Balanced / OpenCode Go')} (Kimi K2.7 Code + DeepSeek V4 Pro + Kimi K2.6)`);
   console.log(`[4] ${chalk.bold.blue('Custom Configuration')}`);
 
   let choice = '';
