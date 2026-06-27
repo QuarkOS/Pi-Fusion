@@ -1,14 +1,14 @@
 # Pi Fusion
 
-Pi Fusion is an orchestration harness and agent extension that implements a multi-model deliberation pipeline. Inspired by the OpenRouter Fusion design pattern, it takes any complex technical request or coding query and runs it through a three-tier process: parallel expert panels, a structured comparative analysis, and a final grounded synthesis.
+A multi-model deliberation harness for the [Pi Coding Agent](https://pi.dev). Pi Fusion takes any complex technical question and runs it through a structured deliberation pipeline -- parallel expert panels, comparative analysis, and grounded synthesis -- producing answers that are more thorough and balanced than any single model can achieve alone.
 
-It is written in Node.js with native ES Modules, requires no build steps, and features out-of-the-box configuration for OpenCode Go subscription models.
+Inspired by the [OpenRouter Fusion](https://openrouter.ai/docs/features/fusion) design pattern. Written in Node.js with native ES Modules, requires no build steps, and ships with ready-to-use presets for OpenCode Go subscription models.
 
 ---
 
 ## How It Works
 
-The deliberation pipeline consists of three sequential stages:
+### 5x Mode (Full Pipeline)
 
 ```
                   [User Query]
@@ -17,13 +17,13 @@ The deliberation pipeline consists of three sequential stages:
          |             |             |
          v             v             v
     [Technical]    [Devil's]     [Systems]       Tier 1: Parallel Panel
-     [Expert]     [Advocate]    [Thinker]        (System Prompt Personas)
+     [Expert]     [Advocate]    [Thinker]        (3 models, run in parallel)
          |             |             |
          +-------------+-------------+
                        |
                        v
                [Deliberation]                    Tier 2: Judge
-                  [Judge]                        (Structured JSON output)
+                  [Judge]                        (Structured JSON comparison)
                        |
                        v
                  [Synthesis]                     Tier 3: Synthesis
@@ -33,93 +33,157 @@ The deliberation pipeline consists of three sequential stages:
                 [Final Answer]
 ```
 
-### Tier 1: Panel (Parallel Execution)
-The user query is sent to three separate expert models in parallel:
-* **Technical Expert** (`kimi-k2.7-code`): Evaluates correctness, architectural patterns, performance, and security.
-* **Devil's Advocate** (`deepseek-v4-pro`): Challenges assumptions, identifies edge cases, highlights risks, and evaluates simpler alternatives.
-* **Systems Thinker** (`kimi-k2.6`): Focuses on integration, API design, testing strategies, long-term technical debt, and maintainability.
+Five LLM calls total. Each panel expert has a different system prompt persona. The Judge produces structured JSON (`consensus`, `contradictions`, `partial_coverage`, `unique_insights`, `blind_spots`). The Synthesis model resolves the contradictions and produces the final answer.
 
-### Tier 2: Judge (Deliberative Analysis)
-A comparison model (`deepseek-v4-pro`) reviews the panel responses to find agreements and conflicts. It produces a structured JSON output with five keys:
-* `consensus`: Core technical decisions where the experts agree.
-* `contradictions`: Specific design conflicts or tradeoffs.
-* `partial_coverage`: Points raised by some but not all models.
-* `unique_insights`: Non-obvious optimizations or approaches.
-* `blind_spots`: Critical omissions or risks that none of the models addressed.
+### 3x Mode (Lean Pipeline)
 
-### Tier 3: Synthesis (Final Grounded Answer)
-A final model (`kimi-k2.7-code`) synthesizes the user query, the panel responses, and the Judge's structured JSON analysis into a comprehensive markdown answer.
-
-### 3x mode (cheap, single-model fusion)
-The default out-of-the-box mode is the **GLM-5.2 Fusion (Best · 3x)** preset: all roles use `glm-5.2` (1M context, open-weight coding/agent SOTA) and the pipeline collapses to **3 LLM calls** instead of 5 — 2 parallel experts (Technical + Devil's Advocate) followed by 1 synthesizer that absorbs the Judge + Systems Thinker roles. This cuts cost ~40% vs the full 5-call pipeline while keeping the deliberation value. Switch presets with `/fusion-config` (or `pi-harness --setup`) to return to the full 5-call panel→judge→synthesis flow.
+Three LLM calls instead of five. Two parallel experts (Technical + Devil's Advocate) followed by one synthesizer that absorbs the Judge and Systems Thinker roles. Roughly 40% cheaper than 5x mode while preserving the core deliberation benefit.
 
 ---
 
-## Configuration and Setup
+## Presets
 
-1. Install dependencies in your project directory:
-   ```bash
-   npm install
-   ```
+| Preset | Mode | Models | Provider | Use Case |
+|--------|------|--------|----------|----------|
+| **GLM-5.2 Fusion** | 3x | All `glm-5.2` | OpenCode Go | Default. Fast, cheap, 1M context. |
+| **Balanced** | 5x | `kimi-k2.7-code`, `deepseek-v4-pro`, `kimi-k2.6` | OpenCode Go | Best coding quality per LiveBench. |
+| **Quality / Frontier** | 5x | `opus-4.8`, `gpt-5.5`, `gemini-3.1-pro` | OpenAI | Highest quality, highest cost. |
+| **Custom** | 5x | User-defined | Any | Full control over every model slot. |
 
-2. Set your OpenCode Go API key:
-   * **Windows (PowerShell)**:
-     ```powershell
-     $env:OC_GO_CC_API_KEY="sk-opencode-..."
-     ```
-   * **Linux/macOS**:
-     ```bash
-     export OC_GO_CC_API_KEY="sk-opencode-..."
-     ```
+The Balanced preset assigns models based on [LiveBench](https://livebench.ai) coding and reasoning averages:
 
-If no OpenCode Go key is found, the client looks for a standard `OPENAI_API_KEY` and falls back to standard OpenAI endpoints.
+- **Technical Expert** and **Synthesis**: `kimi-k2.7-code` (top global coding average)
+- **Devil's Advocate** and **Judge**: `deepseek-v4-pro` (strong reasoning, critical analysis)
+- **Systems Thinker**: `kimi-k2.6` (high global average, holistic reasoning)
 
 ---
 
-## Command Line Usage
+## Getting Started
 
-You can run Pi Fusion directly as a command-line tool.
+### Install as a Pi Extension
 
-### Direct Run
-Submit a query from the terminal:
-```bash
-node bin/pi-harness.js "Explain the tradeoffs between microservices and monoliths"
-```
-
-### Verbose Mode
-Use the `--verbose` or `-v` flag to inspect the individual panel responses:
-```bash
-node bin/pi-harness.js "Write a thread-safe singleton pattern in Go" --verbose
-```
-
-### Interactive Mode (REPL)
-Launch a persistent chat session to run multiple queries:
-```bash
-node bin/pi-harness.js --interactive
-```
-
-### Model Overrides
-You can override default models for any tier using the `--models` flag:
-```bash
-node bin/pi-harness.js "Test query" --models "technical_expert=deepseek-v4-pro,judge=glm-5.1"
-```
-
----
-
-## Installing as a Pi Agent Extension
-
-Pi Fusion is designed to be fully compatible with the Pi Coding Agent (pi.dev). When installed, it adds a `/fusion` command and a `deliberate` tool to the agent.
-
-Install the extension from GitHub:
 ```bash
 pi install git:github.com/QuarkOS/Pi-Fusion.git
 ```
 
-Or install it locally from your project folder:
+Or from npm:
+
 ```bash
-pi install .
+pi install npm:@quarkos/pi-fusion
 ```
 
-### Registered Features inside Pi:
-* **Slash Command**: `/fusion <prompt>` — Runs the multi-model deliberation pipeline directly in your Pi terminal session.
-* **Agent Tool**: `deliberate` — Allows the Pi Coding Agent to call this deliberation process programmatically when solving complex coding problems.
+### Set Your API Key
+
+The default presets use OpenCode Go. Set the API key in your environment:
+
+**Windows (PowerShell):**
+```powershell
+$env:OC_GO_CC_API_KEY = "sk-opencode-..."
+```
+
+**Linux / macOS:**
+```bash
+export OC_GO_CC_API_KEY="sk-opencode-..."
+```
+
+If no OpenCode Go key is found, the client falls back to `OPENAI_API_KEY` and standard OpenAI endpoints. Pi Fusion also reads keys from Pi's own `auth.json` if you have connected a provider through Pi.
+
+### Choose a Preset
+
+Inside Pi, run `/fusion-config` to select a preset interactively. From the CLI, run:
+
+```bash
+npx @quarkos/pi-fusion --setup
+```
+
+---
+
+## Usage
+
+### Inside Pi
+
+Once installed, two features are available:
+
+- **`/fusion <prompt>`** -- Runs the full deliberation pipeline and streams the synthesized answer into your Pi session.
+- **`deliberate` tool** -- Available to the Pi agent itself. When solving complex tasks, the agent can call this tool to get a multi-model deliberation on a sub-problem.
+
+### As a Model Provider
+
+Pi Fusion registers itself as a model provider called `fusion`. You can select it as your active model in Pi's model picker, and every message you send will go through the deliberation pipeline automatically. The synthesis streams token-by-token, and any generated code is routed through a file-agent that saves files to disk using Pi's `write` tool.
+
+### Command Line
+
+Submit a one-off query:
+```bash
+npx @quarkos/pi-fusion "Explain the tradeoffs between microservices and monoliths"
+```
+
+Interactive REPL mode:
+```bash
+npx @quarkos/pi-fusion --interactive
+```
+
+Verbose mode (shows individual panel responses):
+```bash
+npx @quarkos/pi-fusion "Write a thread-safe singleton in Go" --verbose
+```
+
+Override specific model slots:
+```bash
+npx @quarkos/pi-fusion "Test query" --models "judge=glm-5.2,synthesis=deepseek-v4-pro"
+```
+
+---
+
+## Architecture
+
+```
+index.js              Pi extension entry point (provider, commands, tools)
+bin/pi-harness.js     Standalone CLI with setup wizard
+lib/api.js            OpenAI-compatible streaming API client with retry logic
+lib/deliberation.js   Deliberation orchestrator (3x and 5x modes)
+lib/ui.js             Terminal formatting for CLI output
+```
+
+The API client streams all responses to prevent gateway timeouts, accumulates token usage across calls, handles Kimi-specific temperature constraints (`temperature: 1.0`), and retries transient network errors with exponential backoff. The file-agent step after synthesis uses `deepseek-v4-flash` (cheap, near-unlimited on OpenCode Go) with tool-calling to decide what files to save.
+
+---
+
+## Configuration
+
+Pi Fusion looks for a `pi-harness.config.json` in your working directory. If none exists, it uses built-in defaults. The config file is generated automatically when you run the setup wizard.
+
+Key fields:
+
+| Field | Description |
+|-------|-------------|
+| `provider` | Which provider to use (`opencode-go`, `openai`) |
+| `mode` | `3x` (lean) or `5x` (full pipeline) |
+| `providers.<name>.defaultModels` | Model IDs for each pipeline slot |
+| `panel.<role>.systemPrompt` | Custom system prompts per expert |
+| `judge.systemPrompt` | Judge comparison instructions |
+| `synthesis.systemPrompt` | Final synthesis instructions |
+| `fileAgentModel` | Model used for the file-saving step (default: `deepseek-v4-flash`) |
+
+---
+
+## Development
+
+```bash
+git clone https://github.com/QuarkOS/Pi-Fusion.git
+cd Pi-Fusion
+npm install
+```
+
+Run the full test suite (requires a valid `OC_GO_CC_API_KEY`):
+
+```bash
+npm test                  # Live API deliberation test
+npm run verify:stream     # Offline stream protocol tests
+```
+
+---
+
+## License
+
+[MIT](LICENSE)

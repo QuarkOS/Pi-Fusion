@@ -1,0 +1,16 @@
+# Test and verification files
+verify-harness.js
+verify-stream.mjs
+verify-stream-loader.mjs
+
+# Config that users generate locally
+pi-harness.config.json
+
+# Development files
+.gitignore
+.git/
+.github/
+.pi/
+*.log
+.DS_Store
+.env

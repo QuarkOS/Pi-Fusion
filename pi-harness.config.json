@@ -1,5 +1,6 @@
 {
-  "configured": false,
+  "configured": true,
+  "mode": "3x",
   "provider": "opencode-go",
   "providers": {
     "opencode-go": {
