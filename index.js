@@ -357,10 +357,6 @@ export default function (pi) {
         return;
       }
 
-      // ponytail: ctx.ui has no write()/print() — progress goes to the footer status row
-      // (setStatus), and the final answer is pushed as a custom transcript message. The
-      // default custom-message renderer shows it as a markdown block with no renderer
-      // registration needed (interactive-mode.js -> CustomMessageComponent default path).
       ctx.ui.setStatus('fusion', '🧠 Starting deliberation pipeline…');
 
       try {
@@ -387,12 +383,63 @@ export default function (pi) {
           }
         });
 
-        // Persist the synthesis as a transcript row (display:true renders it even with no
-        // registered renderer). triggerTurn:false so it doesn't re-prompt the agent.
+        // File-agent step: ask a cheap model to extract files from the synthesis and save them.
+        ctx.ui.setStatus('fusion', '💾 Saving files…');
+        const provider = config.provider || 'opencode-go';
+        const providerConfig = config.providers[provider];
+        const fileAgentModel = config.fileAgentModel || 'deepseek-v4-flash';
+
+        let apiKey = '';
+        const auth = getPiAuth();
+        if (auth[provider] && auth[provider].key) {
+          apiKey = auth[provider].key;
+        }
+
+        const apiClient = new ApiClient({
+          baseUrl: providerConfig.baseUrl,
+          apiKeyEnvVar: providerConfig.apiKeyEnv,
+          apiKey: apiKey
+        });
+
+        let savedFiles = [];
+        try {
+          const fileAgentResult = await apiClient.chatCompletion({
+            model: fileAgentModel,
+            temperature: 0.2,
+            messages: [
+              { role: 'system', content: 'You are a file-saving agent. You receive a deliberation synthesis that may contain code, files, or project structure. Use the write tool to save every file the user would expect from the original request. Choose sensible filenames inferred from the request and the code\'s language. If the synthesis contains no files to save (e.g. it is a conceptual answer), do NOT call any tool — just reply with a brief one-line acknowledgment. Never explain at length; either call write tool(s) or give a one-line confirmation.' },
+              { role: 'user', content: `Original user request: ${prompt}\n\nDeliberation synthesis:\n${result.synthesis}\n\nSave the file(s) now using the write tool, or confirm if nothing needs saving.` }
+            ],
+            tools: WRITE_TOOL,
+          });
+
+          const toolCalls = fileAgentResult.toolCalls || [];
+          for (const tc of toolCalls) {
+            if (tc.name === 'write' && tc.arguments) {
+              const filePath = path.resolve(process.cwd(), tc.arguments.path);
+              const dir = path.dirname(filePath);
+              fs.mkdirSync(dir, { recursive: true });
+              fs.writeFileSync(filePath, tc.arguments.content, 'utf8');
+              savedFiles.push(tc.arguments.path);
+            }
+          }
+        } catch (fileErr) {
+          ctx.ui.notify(`File agent skipped: ${fileErr.message}`, 'warning');
+        }
+
+        // Show synthesis + saved files summary
+        const filesSummary = savedFiles.length > 0
+          ? `\n\n---\nSaved ${savedFiles.length} file${savedFiles.length > 1 ? 's' : ''}: ${savedFiles.map(f => `\`${f}\``).join(', ')}`
+          : '';
+
         pi.sendMessage(
-          { customType: 'fusion-answer', content: result.synthesis, display: true },
+          { customType: 'fusion-answer', content: result.synthesis + filesSummary, display: true },
           { triggerTurn: false }
         );
+
+        if (savedFiles.length > 0) {
+          ctx.ui.notify(`Saved ${savedFiles.length} file${savedFiles.length > 1 ? 's' : ''}: ${savedFiles.join(', ')}`, 'info');
+        }
       } catch (error) {
         ctx.ui.notify(`Deliberation failed: ${error.message}`, 'error');
       } finally {
