@@ -340,7 +340,7 @@ export default function (pi) {
   pi.registerCommand('fusion', {
     description: 'Run multi-model deliberation (Panel -> Judge -> Synthesis)',
     handler: async (args, ctx) => {
-      const prompt = args.join(' ').trim();
+      const prompt = (Array.isArray(args) ? args.join(' ') : String(args || '')).trim();
       if (!prompt) {
         ctx.ui.notify('Please provide a prompt. Usage: /fusion <your query>', 'error');
         return;
