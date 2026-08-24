@@ -2,8 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import os from 'node:os';
-import { createAssistantMessageEventStream, getProviders, getModels, calculateCost } from '@earendil-works/pi-ai';
 import { ApiClient } from './lib/api.js';
+import { apiKeyEnvName, loadConfig, getDefaultConfig } from './lib/config.js';
+import { createAssistantMessageEventStream } from './lib/event-stream.js';
+import { loadPiAi } from './lib/pi-ai.js';
+import { applyPreset, customFallbackModels, PRESETS } from './lib/presets.js';
 import { Deliberator } from './lib/deliberation.js';
 
 const getPiAuth = () => {
@@ -25,6 +28,7 @@ const isProviderConnected = (provider, auth) => {
   }
   const envVars = {
     'opencode-go': ['OC_GO_CC_API_KEY', 'OPENCODE_API_KEY'],
+    'opencode-zen': ['OPENCODE_API_KEY', 'ZEN_API_KEY', 'OC_GO_CC_API_KEY'],
     'openai': ['OPENAI_API_KEY'],
     'anthropic': ['ANTHROPIC_API_KEY'],
     'google': ['GEMINI_API_KEY'],
@@ -35,45 +39,6 @@ const isProviderConnected = (provider, auth) => {
   };
   const vars = envVars[provider] || [];
   return vars.some(v => !!process.env[v]);
-};
-
-// Load default config
-const defaultConfig = {
-  configured: true,
-  provider: 'opencode-go',
-  // 3x GLM-5.2 fusion is the out-of-the-box "best" OpenCode Go mode: 3 LLM calls,
-  // all glm-5.2 (1M context, coding/agent SOTA). Switch via /fusion-config to override.
-  mode: '3x',
-  providers: {
-    'opencode-go': {
-      baseUrl: 'https://opencode.ai/zen/go/v1',
-      apiKeyEnv: 'OC_GO_CC_API_KEY',
-      defaultModels: {
-        technical_expert: 'glm-5.2',
-        devils_advocate: 'glm-5.2',
-        systems_thinker: 'glm-5.2',
-        judge: 'glm-5.2',
-        synthesis: 'glm-5.2'
-      }
-    }
-  },
-  panel: {
-    technical_expert: {
-      systemPrompt: "You are a Technical Expert coding agent. Focus on correctness, design patterns, security, and performance. Keep your output extremely concise, direct, and under 1,500 tokens. Write code and core points directly without verbose filler to prevent timeouts."
-    },
-    devils_advocate: {
-      systemPrompt: "You are a Devil's Advocate coding agent. Challenge assumptions, identify risks, and suggest alternatives. Be critical. Keep your output extremely concise, direct, and under 1,500 tokens. Focus on core points directly to prevent timeouts."
-    },
-    systems_thinker: {
-      systemPrompt: "You are a Systems Thinker coding agent. Focus on integration, interfaces, maintainability, and testing. Holistic view. Keep your output extremely concise, direct, and under 1,500 tokens. Focus on core points directly to prevent timeouts."
-    }
-  },
-  judge: {
-    systemPrompt: "You are the Deliberation Judge. Compare the three panel expert responses. Output a JSON block wrapped in a standard markdown code block (using ```json ... ```) containing: consensus (array), contradictions (array), partial_coverage (array), unique_insights (array), and blind_spots (array). Keep your JSON output concise and focused."
-  },
-  synthesis: {
-    systemPrompt: "You are the Synthesis Model. Write the final comprehensive response to the user query, grounded strictly in the panel responses and the judge's JSON analysis. Keep your output extremely concise, direct, and under 1,500 tokens. Write code and key points directly without verbose filler to prevent timeouts."
-  }
 };
 
 // OpenAI tool definition for the `write` tool — sent to the file-agent model so it can
@@ -106,18 +71,7 @@ export default function (pi) {
     activeUi = ctx.ui;
   });
 
-  const getLocalConfig = () => {
-    // Try to load local config if it exists in the workspace
-    const localConfigPath = path.join(process.cwd(), 'pi-harness.config.json');
-    if (fs.existsSync(localConfigPath)) {
-      try {
-        return JSON.parse(fs.readFileSync(localConfigPath, 'utf8'));
-      } catch {
-        // Ignore and fallback
-      }
-    }
-    return defaultConfig;
-  };
+  const getLocalConfig = () => loadConfig();
 
   const getDeliberator = () => {
     const config = getLocalConfig();
@@ -132,7 +86,7 @@ export default function (pi) {
 
     const apiClient = new ApiClient({
       baseUrl: providerConfig.baseUrl,
-      apiKeyEnvVar: providerConfig.apiKeyEnv,
+      apiKeyEnvVar: apiKeyEnvName(providerConfig),
       apiKey: apiKey
     });
 
@@ -143,94 +97,34 @@ export default function (pi) {
     if (!ui) return null;
     
     const choice = await ui.select('Select a deliberation model preset:', [
-      'GLM-5.2 Fusion (Best · 3x · OpenCode Go)',
-      'Quality / Frontier (Opus 4.8 + GPT 5.5 + Gemini 3.1 Pro)',
-      'OpenCode Go (High Quality: Kimi K2.7 + Qwen 3.7 Plus)',
-      'OpenCode Go (Balanced: Kimi K2.7 + DeepSeek V4 + Kimi K2.6)',
+      'GLM-5.3 Fusion (Best · 3x · OpenCode Go)',
+      'Quality / Frontier (Grok 4.6 + GPT 5.6 Luna + Kimi K3 · OpenCode Zen)',
+      'OpenCode Go (High Quality: Kimi K3 + Qwen 3.8 Max)',
+      'OpenCode Go (Balanced: Kimi K3 + DeepSeek V4 Pro + GLM-5.3)',
       'Custom Configuration'
     ]);
 
     let config = getLocalConfig();
-    config.configured = true;
-    // Default to full 5-call pipeline; the GLM-5.2 preset overrides to '3x' below.
-    config.mode = '5x';
-
-    // Ensure providers object exists
     if (!config.providers) {
       config.providers = {};
     }
 
-    if (choice.startsWith('GLM-5.2')) {
-      // 3x GLM-5.2 fusion: 2 parallel experts + 1 synthesizer (3 LLM calls total),
-      // all glm-5.2. The synthesizer absorbs the Judge + Systems Thinker roles.
-      config.provider = 'opencode-go';
-      config.mode = '3x';
-      if (!config.providers['opencode-go']) {
-        config.providers['opencode-go'] = {
-          baseUrl: 'https://opencode.ai/zen/go/v1',
-          apiKeyEnv: 'OC_GO_CC_API_KEY'
-        };
-      }
-      config.providers['opencode-go'].defaultModels = {
-        technical_expert: 'glm-5.2',
-        devils_advocate: 'glm-5.2',
-        systems_thinker: 'glm-5.2',
-        judge: 'glm-5.2',
-        synthesis: 'glm-5.2'
-      };
-      ui.notify('GLM-5.2 Fusion (Best · 3x) Preset configured.', 'info');
+    if (choice.startsWith('GLM-5.3')) {
+      applyPreset(config, PRESETS.glmFusion);
+      ui.notify('GLM-5.3 Fusion (Best · 3x · OpenCode Go) configured.', 'info');
     } else if (choice.startsWith('Quality')) {
-      config.provider = 'openai';
-      // Fallback defaults for Quality preset if not present
-      if (!config.providers.openai) {
-        config.providers.openai = {
-          baseUrl: 'https://api.openai.com/v1',
-          apiKeyEnv: 'OPENAI_API_KEY',
-          defaultModels: {
-            technical_expert: 'gpt-5.5',
-            devils_advocate: 'opus-4.8',
-            systems_thinker: 'gemini-3.1-pro',
-            judge: 'gpt-5.5',
-            synthesis: 'gpt-5.5'
-          }
-        };
-      }
-      ui.notify('Quality / Frontier Preset configured.', 'info');
+      applyPreset(config, PRESETS.quality);
+      ui.notify('Quality / Frontier (OpenCode Zen · grok-4.6) configured.', 'info');
     } else if (choice.includes('High Quality')) {
-      config.provider = 'opencode-go';
-      if (!config.providers['opencode-go']) {
-        config.providers['opencode-go'] = {
-          baseUrl: 'https://opencode.ai/zen/go/v1',
-          apiKeyEnv: 'OC_GO_CC_API_KEY'
-        };
-      }
-      config.providers['opencode-go'].defaultModels = {
-        technical_expert: 'kimi-k2.7-code',
-        devils_advocate: 'qwen3.7-plus',
-        systems_thinker: 'kimi-k2.7-code',
-        judge: 'qwen3.7-plus',
-        synthesis: 'qwen3.7-plus'
-      };
+      applyPreset(config, PRESETS.highQuality);
       ui.notify('OpenCode Go (High Quality) Preset configured.', 'info');
     } else if (choice.includes('Balanced')) {
-      config.provider = 'opencode-go';
-      if (!config.providers['opencode-go']) {
-        config.providers['opencode-go'] = {
-          baseUrl: 'https://opencode.ai/zen/go/v1',
-          apiKeyEnv: 'OC_GO_CC_API_KEY'
-        };
-      }
-      config.providers['opencode-go'].defaultModels = {
-        technical_expert: 'kimi-k2.7-code',
-        devils_advocate: 'deepseek-v4-pro',
-        systems_thinker: 'kimi-k2.6',
-        judge: 'deepseek-v4-pro',
-        synthesis: 'kimi-k2.7-code'
-      };
+      applyPreset(config, PRESETS.balanced);
       ui.notify('OpenCode Go (Balanced) Preset configured.', 'info');
     } else {
       // Custom Configuration
       const auth = getPiAuth();
+      const { getProviders, getModels } = await loadPiAi();
       const availableProviders = getProviders();
 
       const providerChoices = availableProviders.map(p => {
@@ -249,6 +143,8 @@ export default function (pi) {
       const selectedProviderChoice = providerChoices.find(c => c.label === providerLabelChoice) || providerChoices[0];
       const provider = selectedProviderChoice.id;
       config.provider = provider;
+      config.configured = true;
+      config.mode = '5x';
 
       const providerModels = getModels(provider);
       const defaultBaseUrl = providerModels.length > 0 ? providerModels[0].baseUrl : '';
@@ -256,6 +152,7 @@ export default function (pi) {
       // Determine default API Key Env Var name
       const defaultEnvVars = {
         'opencode-go': 'OC_GO_CC_API_KEY',
+        'opencode-zen': 'OPENCODE_API_KEY',
         'openai': 'OPENAI_API_KEY',
         'anthropic': 'ANTHROPIC_API_KEY',
         'google': 'GEMINI_API_KEY',
@@ -303,12 +200,13 @@ export default function (pi) {
 
       const existingProviderConfig = config.providers[provider] || {};
       const existingModels = existingProviderConfig.defaultModels || {};
+      const fallbacks = customFallbackModels(provider);
 
-      const technical_expert = await selectModelForRole('Technical Expert', existingModels.technical_expert || 'qwen3.7-plus');
-      const devils_advocate = await selectModelForRole('Devil\'s Advocate', existingModels.devils_advocate || 'deepseek-v4-pro');
-      const systems_thinker = await selectModelForRole('Systems Thinker', existingModels.systems_thinker || 'glm-5.1');
-      const judge = await selectModelForRole('Judge', existingModels.judge || 'qwen3.7-plus');
-      const synthesis = await selectModelForRole('Synthesis', existingModels.synthesis || 'qwen3.7-plus');
+      const technical_expert = await selectModelForRole('Technical Expert', existingModels.technical_expert || fallbacks.technical_expert);
+      const devils_advocate = await selectModelForRole('Devil\'s Advocate', existingModels.devils_advocate || fallbacks.devils_advocate);
+      const systems_thinker = await selectModelForRole('Systems Thinker', existingModels.systems_thinker || fallbacks.systems_thinker);
+      const judge = await selectModelForRole('Judge', existingModels.judge || fallbacks.judge);
+      const synthesis = await selectModelForRole('Synthesis', existingModels.synthesis || fallbacks.synthesis);
 
       config.providers[provider] = {
         baseUrl,
@@ -397,7 +295,7 @@ export default function (pi) {
 
         const apiClient = new ApiClient({
           baseUrl: providerConfig.baseUrl,
-          apiKeyEnvVar: providerConfig.apiKeyEnv,
+          apiKeyEnvVar: apiKeyEnvName(providerConfig),
           apiKey: apiKey
         });
 
@@ -609,7 +507,7 @@ export default function (pi) {
           // Check configuration
           let config = getLocalConfig();
           if (!config || !config.configured) {
-            config = defaultConfig;
+            config = getDefaultConfig();
           }
 
           if (!config) {
@@ -625,7 +523,7 @@ export default function (pi) {
           
           const apiClient = new ApiClient({
             baseUrl: providerConfig.baseUrl,
-            apiKeyEnvVar: providerConfig.apiKeyEnv
+            apiKeyEnvVar: apiKeyEnvName(providerConfig)
           });
 
           let streamedText = '';
@@ -722,9 +620,10 @@ export default function (pi) {
           // usage.cost in place using the fusion model's cost rates. Token counts are real;
           // cost is zero unless the model definition has non-zero cost rates.
           try {
+            const { calculateCost } = await loadPiAi();
             calculateCost(model, finalUsage);
           } catch {
-            // calculateCost optional; if it throws, keep raw token counts with zero cost
+            // calculateCost optional; if it throws or pi-ai is missing, keep raw token counts
           }
 
           // Emit each tool call from the file agent as a proper toolcall block.

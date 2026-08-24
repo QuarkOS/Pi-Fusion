@@ -2,7 +2,7 @@
 
 A multi-model deliberation harness for the [Pi Coding Agent](https://pi.dev). Pi Fusion takes any complex technical question and runs it through a structured deliberation pipeline -- parallel expert panels, comparative analysis, and grounded synthesis -- producing answers that are more thorough and balanced than any single model can achieve alone.
 
-Inspired by the [OpenRouter Fusion](https://openrouter.ai/docs/features/fusion) design pattern. Written in Node.js with native ES Modules, requires no build steps, and ships with ready-to-use presets for OpenCode Go subscription models.
+Inspired by the [OpenRouter Fusion](https://openrouter.ai/docs/features/fusion) design pattern. Written in Node.js with native ES Modules, requires no build steps, and ships with presets for OpenCode Go and OpenCode Zen.
 
 ---
 
@@ -43,18 +43,38 @@ Three LLM calls instead of five. Two parallel experts (Technical + Devil's Advoc
 
 ## Presets
 
-| Preset | Mode | Models | Provider | Use Case |
-|--------|------|--------|----------|----------|
-| **GLM-5.2 Fusion** | 3x | All `glm-5.2` | OpenCode Go | Default. Fast, cheap, 1M context. |
-| **Balanced** | 5x | `kimi-k2.7-code`, `deepseek-v4-pro`, `kimi-k2.6` | OpenCode Go | Best coding quality per LiveBench. |
-| **Quality / Frontier** | 5x | `opus-4.8`, `gpt-5.5`, `gemini-3.1-pro` | OpenAI | Highest quality, highest cost. |
+IDs below were checked on 2026-08-24 against [OpenCode Go](https://opencode.ai/docs/go/), `GET https://opencode.ai/zen/go/v1/models`, [OpenCode Zen](https://opencode.ai/docs/zen/), and `GET https://opencode.ai/zen/v1/models`. Do not copy a Zen-only id into a Go preset.
+
+| Preset | Mode | Models | Catalog | Use case |
+|--------|------|--------|---------|----------|
+| **GLM-5.3 Fusion** | 3x | All `glm-5.3` | OpenCode Go | Default. Latest GLM on Go. |
+| **Balanced** | 5x | `kimi-k3`, `deepseek-v4-pro`, `glm-5.3` | OpenCode Go | Three labs, still on the Go subscription. |
+| **High Quality** | 5x | `kimi-k3`, `qwen3.8-max` | OpenCode Go | Kimi + latest Qwen on Go (`qwen3.8-max` is not on Zen). |
+| **Quality / Frontier** | 5x | `grok-4.6`, `gpt-5.6-luna`, `kimi-k3` | OpenCode Zen | Newest Grok. `grok-4.6` is not on Go. |
 | **Custom** | 5x | User-defined | Any | Full control over every model slot. |
 
-The Balanced preset assigns models based on [LiveBench](https://livebench.ai) coding and reasoning averages:
+Role assignments:
 
-- **Technical Expert** and **Synthesis**: `kimi-k2.7-code` (top global coding average)
-- **Devil's Advocate** and **Judge**: `deepseek-v4-pro` (strong reasoning, critical analysis)
-- **Systems Thinker**: `kimi-k2.6` (high global average, holistic reasoning)
+- **GLM Fusion.** Every slot is `glm-5.3` on Go. Zen still lists `glm-5.2` as its newest GLM, so this preset stays on Go.
+- **Balanced.** Technical Expert and Synthesis: `kimi-k3`. Devil's Advocate and Judge: `deepseek-v4-pro`. Systems Thinker: `glm-5.3`.
+- **High Quality.** Technical Expert, Systems Thinker, and Synthesis: `kimi-k3`. Devil's Advocate and Judge: `qwen3.8-max`.
+- **Quality / Frontier.** Technical Expert and Synthesis: `grok-4.6`. Devil's Advocate and Judge: `gpt-5.6-luna`. Systems Thinker: `kimi-k3`. Served from `https://opencode.ai/zen/v1` with `OPENCODE_API_KEY`. If you must stay on Go, the equivalent Grok slot is `grok-4.5`, not 4.6.
+
+### Which catalog an id lives on
+
+| ID | OpenCode Go (`/zen/go/v1`) | OpenCode Zen (`/zen/v1`) | Notes |
+|----|----------------------------|--------------------------|-------|
+| `glm-5.3` | yes | no | Newest GLM on Go. Zen's newest GLM is `glm-5.2`. |
+| `kimi-k3` | yes | yes | Newest Kimi on both. |
+| `deepseek-v4-pro` | yes | yes | |
+| `deepseek-v4-flash` | yes | yes | Default file-agent model. |
+| `qwen3.8-max` | yes | no | High Quality stays on Go for this reason. |
+| `gpt-5.6-luna` | yes | yes | Also on the public OpenAI API. |
+| `grok-4.5` | yes | yes | Newest Grok **on Go**. |
+| `grok-4.6` | no | yes | xAI id `grok-4.6` (12 Aug 2026). Also `https://api.x.ai/v1`. Putting this on a Go 3x preset will 404. |
+| `gpt-5.6-sol` | no | yes | Public OpenAI flagship. Used for the packaged `openai` provider, not for Go. |
+
+Go also lists `grok-4.5`, `glm-5.2`, `kimi-k2.7-code`, and others. Those still work; the presets pick the newest id that exists on that catalog.
 
 ---
 
@@ -72,6 +92,8 @@ Or from npm:
 pi install npm:@quarkos/pi-fusion
 ```
 
+The Pi extension uses `@earendil-works/pi-ai`, which Pi already provides. The standalone CLI does not need that package.
+
 ### Set Your API Key
 
 The default presets use OpenCode Go. Set the API key in your environment:
@@ -86,7 +108,9 @@ $env:OC_GO_CC_API_KEY = "sk-opencode-..."
 export OC_GO_CC_API_KEY="sk-opencode-..."
 ```
 
-If no OpenCode Go key is found, the client falls back to `OPENAI_API_KEY` and standard OpenAI endpoints. Pi Fusion also reads keys from Pi's own `auth.json` if you have connected a provider through Pi.
+The Quality / Frontier preset uses OpenCode Zen (`OPENCODE_API_KEY`) because `grok-4.6` is not on the Go catalog. The same OpenCode account key often works for both endpoints.
+
+If no OpenCode key is found, the client falls back to `OPENAI_API_KEY` and standard OpenAI endpoints. Pi Fusion also reads keys from Pi's own `auth.json` if you have connected a provider through Pi.
 
 ### Choose a Preset
 
@@ -130,7 +154,7 @@ npx @quarkos/pi-fusion "Write a thread-safe singleton in Go" --verbose
 
 Override specific model slots:
 ```bash
-npx @quarkos/pi-fusion "Test query" --models "judge=glm-5.2,synthesis=deepseek-v4-pro"
+npx @quarkos/pi-fusion "Test query" --models "judge=glm-5.3,synthesis=deepseek-v4-pro"
 ```
 
 ---
@@ -141,6 +165,8 @@ npx @quarkos/pi-fusion "Test query" --models "judge=glm-5.2,synthesis=deepseek-v
 index.js              Pi extension entry point (provider, commands, tools)
 bin/pi-harness.js     Standalone CLI with setup wizard
 lib/api.js            OpenAI-compatible streaming API client with retry logic
+lib/config.js         Packaged default config (shared by CLI and Pi entry)
+lib/presets.js        Go / Zen / OpenAI model IDs and preset maps
 lib/deliberation.js   Deliberation orchestrator (3x and 5x modes)
 lib/ui.js             Terminal formatting for CLI output
 ```
@@ -151,13 +177,13 @@ The API client streams all responses to prevent gateway timeouts, accumulates to
 
 ## Configuration
 
-Pi Fusion looks for a `pi-harness.config.json` in your working directory. If none exists, it uses built-in defaults. The config file is generated automatically when you run the setup wizard.
+Pi Fusion looks for a `pi-harness.config.json` in your working directory. If none exists, it uses the packaged default: **3x GLM-5.3 Fusion** on OpenCode Go (`https://opencode.ai/zen/go/v1`). That file also includes an OpenCode Zen provider (`https://opencode.ai/zen/v1`, `grok-4.6`) and a public OpenAI provider (`https://api.openai.com/v1`, `gpt-5.6-sol`). The config file is generated automatically when you run the setup wizard.
 
 Key fields:
 
 | Field | Description |
 |-------|-------------|
-| `provider` | Which provider to use (`opencode-go`, `openai`) |
+| `provider` | Which provider to use (`opencode-go`, `opencode-zen`, `openai`) |
 | `mode` | `3x` (lean) or `5x` (full pipeline) |
 | `providers.<name>.defaultModels` | Model IDs for each pipeline slot |
 | `panel.<role>.systemPrompt` | Custom system prompts per expert |
@@ -175,11 +201,10 @@ cd Pi-Fusion
 npm install
 ```
 
-Run the full test suite (requires a valid `OC_GO_CC_API_KEY`):
-
 ```bash
-npm test                  # Live API deliberation test
-npm run verify:stream     # Offline stream protocol tests
+npm test                  # Offline unit tests (no API keys)
+npm run test:stream       # Stream protocol tests (offline, no pi-ai)
+npm run test:live         # Live API deliberation (needs OC_GO_CC_API_KEY)
 ```
 
 ---

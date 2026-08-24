@@ -1,10 +1,7 @@
-# Test and verification files
+# Live API verification (needs keys; not part of npm test)
 verify-harness.js
 verify-stream.mjs
 verify-stream-loader.mjs
-
-# Config that users generate locally
-pi-harness.config.json
 
 # Development files
 .gitignore
