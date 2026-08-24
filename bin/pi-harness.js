@@ -195,6 +195,7 @@ program
   .option('-p, --provider <name>', 'Provider to use (opencode-go, opencode-zen, openai)')
   .option('-c, --config <path>', 'Path to custom config JSON file')
   .option('-m, --models <overrides>', 'Comma-separated model overrides (e.g. judge=deepseek-v4-pro,synthesis=glm-5.3)')
+  .addHelpText('after', '\nStar the repo: https://github.com/QuarkOS/Pi-Fusion\n')
   .action(async (prompt, options) => {
     // Determine target config path
     const targetConfigPath = options.config || path.join(process.cwd(), 'pi-harness.config.json');
