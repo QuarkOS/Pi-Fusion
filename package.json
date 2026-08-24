@@ -1,9 +1,14 @@
 {
   "name": "@quarkos/pi-fusion",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Multi-model deliberation harness (OpenRouter Fusion pattern) for OpenCode Go",
   "main": "index.js",
   "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./index.js": "./index.js",
+    "./package.json": "./package.json"
+  },
   "pi": {
     "extensions": ["./index.js"]
   },
@@ -15,13 +20,16 @@
     "lib/",
     "index.js",
     "pi-harness.config.json",
+    "test/",
     "LICENSE",
     "README.md"
   ],
   "scripts": {
     "start": "node bin/pi-harness.js",
-    "test": "node verify-harness.js",
-    "test:all": "node verify-harness.js && node verify-stream.mjs",
+    "test": "node --test test/offline.test.js",
+    "test:stream": "node verify-stream.mjs",
+    "test:live": "node verify-harness.js",
+    "test:all": "node --test test/offline.test.js && node verify-stream.mjs && node verify-harness.js",
     "verify:stream": "node verify-stream.mjs"
   },
   "keywords": [
@@ -54,5 +62,13 @@
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "ora": "^8.0.1"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    }
   }
 }

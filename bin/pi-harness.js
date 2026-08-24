@@ -7,64 +7,10 @@ import readline from 'node:readline';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { ApiClient } from '../lib/api.js';
+import { apiKeyEnvName, getPackageJson, loadConfig } from '../lib/config.js';
+import { applyPreset, customFallbackModels, PRESETS, PROVIDERS } from '../lib/presets.js';
 import { Deliberator } from '../lib/deliberation.js';
 import { TerminalUi } from '../lib/ui.js';
-
-// Resolve configuration
-function loadConfig(configPath) {
-  const defaultPaths = [
-    configPath,
-    path.join(process.cwd(), 'pi-harness.config.json'),
-    path.join(path.dirname(new URL(import.meta.url).pathname), '../pi-harness.config.json')
-  ].filter(Boolean);
-
-  for (const p of defaultPaths) {
-    try {
-      if (fs.existsSync(p)) {
-        const raw = fs.readFileSync(p, 'utf8');
-        return JSON.parse(raw);
-      }
-    } catch {
-      // Ignore and check next path
-    }
-  }
-
-  // Fallback default config if no config files can be read
-  return {
-    configured: false,
-    provider: 'opencode-go',
-    providers: {
-      'opencode-go': {
-        baseUrl: 'https://opencode.ai/zen/go/v1',
-        apiKeyEnv: 'OC_GO_CC_API_KEY',
-        defaultModels: {
-          technical_expert: 'kimi-k2.7-code',
-          devils_advocate: 'deepseek-v4-pro',
-          systems_thinker: 'kimi-k2.6',
-          judge: 'deepseek-v4-pro',
-          synthesis: 'kimi-k2.7-code'
-        }
-      }
-    },
-    panel: {
-      technical_expert: {
-        systemPrompt: "You are a Technical Expert coding agent. Focus on correctness, design patterns, security, and performance. Be concise."
-      },
-      devils_advocate: {
-        systemPrompt: "You are a Devil's Advocate coding agent. Challenge assumptions, identify risks, and suggest alternatives. Be critical."
-      },
-      systems_thinker: {
-        systemPrompt: "You are a Systems Thinker coding agent. Focus on integration, interfaces, maintainability, and testing. Holistic view."
-      }
-    },
-    judge: {
-      systemPrompt: "You are the Deliberation Judge. Compare the three panel expert responses. Output ONLY valid JSON containing: consensus (array), contradictions (array), partial_coverage (array), unique_insights (array), and blind_spots (array)."
-    },
-    synthesis: {
-      systemPrompt: "You are the Synthesis Model. Write the final comprehensive response to the user query, grounded strictly in the panel responses and the judge's JSON analysis."
-    }
-  };
-}
 
 // Interactive prompt utility
 function askQuestion(query) {
@@ -82,97 +28,56 @@ function askQuestion(query) {
 async function runSetupWizard(configPath) {
   console.log(chalk.bold.cyan('\n⚙️  Pi Fusion Configuration Wizard'));
   console.log('Select a deliberation model preset:');
-  console.log(`[1] ${chalk.bold.magenta('GLM-5.2 Fusion (Best)')} (3x · OpenCode Go · 1M context)`);
-  console.log(`[2] ${chalk.bold.yellow('Quality / Frontier')} (Opus 4.8 + GPT 5.5 + Gemini 3.1 Pro)`);
-  console.log(`[3] ${chalk.bold.green('Balanced / OpenCode Go')} (Kimi K2.7 Code + DeepSeek V4 Pro + Kimi K2.6)`);
-  console.log(`[4] ${chalk.bold.blue('Custom Configuration')}`);
+  console.log(`[1] ${chalk.bold.magenta('GLM-5.3 Fusion (Best)')} (3x · OpenCode Go)`);
+  console.log(`[2] ${chalk.bold.yellow('Quality / Frontier')} (Grok 4.6 + GPT 5.6 Luna + Kimi K3 · OpenCode Zen)`);
+  console.log(`[3] ${chalk.bold.cyan('High Quality / OpenCode Go')} (Kimi K3 + Qwen 3.8 Max)`);
+  console.log(`[4] ${chalk.bold.green('Balanced / OpenCode Go')} (Kimi K3 + DeepSeek V4 Pro + GLM-5.3)`);
+  console.log(`[5] ${chalk.bold.blue('Custom Configuration')}`);
 
   let choice = '';
-  while (!['1', '2', '3', '4'].includes(choice)) {
-    choice = await askQuestion('\nChoose preset [1-4]: ');
+  while (!['1', '2', '3', '4', '5'].includes(choice)) {
+    choice = await askQuestion('\nChoose preset [1-5]: ');
   }
 
   let config = loadConfig(configPath);
-  config.configured = true;
-  config.mode = '5x';
+  if (!config.providers) config.providers = {};
 
   if (choice === '1') {
-    // 3x GLM-5.2 fusion: 2 parallel experts + 1 synthesizer (3 LLM calls total), all glm-5.2.
-    config.provider = 'opencode-go';
-    config.mode = '3x';
-    if (!config.providers) config.providers = {};
-    if (!config.providers['opencode-go']) {
-      config.providers['opencode-go'] = {
-        baseUrl: 'https://opencode.ai/zen/go/v1',
-        apiKeyEnvVar: 'OC_GO_CC_API_KEY',
-        defaultModels: {}
-      };
-    }
-    config.providers['opencode-go'].defaultModels = {
-      technical_expert: 'glm-5.2',
-      devils_advocate: 'glm-5.2',
-      systems_thinker: 'glm-5.2',
-      judge: 'glm-5.2',
-      synthesis: 'glm-5.2'
-    };
-    console.log(chalk.green('\n✓ GLM-5.2 Fusion (Best · 3x) Preset configured.'));
+    applyPreset(config, PRESETS.glmFusion);
+    console.log(chalk.green('\n✓ GLM-5.3 Fusion (Best · 3x · OpenCode Go) configured.'));
   } else if (choice === '2') {
-    config.provider = 'openai';
-    if (!config.providers) config.providers = {};
-    if (!config.providers.openai) {
-      config.providers.openai = {
-        baseUrl: 'https://api.openai.com/v1',
-        apiKeyEnvVar: 'OPENAI_API_KEY',
-        defaultModels: {}
-      };
-    }
-    config.providers.openai.defaultModels = {
-      technical_expert: 'gpt-5.5',
-      devils_advocate: 'opus-4.8',
-      systems_thinker: 'gemini-3.1-pro',
-      judge: 'gpt-5.5',
-      synthesis: 'gpt-5.5'
-    };
-    console.log(chalk.green('\n✓ Quality / Frontier Preset configured.'));
+    applyPreset(config, PRESETS.quality);
+    console.log(chalk.green('\n✓ Quality / Frontier (OpenCode Zen · grok-4.6) configured.'));
   } else if (choice === '3') {
-    config.provider = 'opencode-go';
-    if (!config.providers) config.providers = {};
-    if (!config.providers['opencode-go']) {
-      config.providers['opencode-go'] = {
-        baseUrl: 'https://opencode.ai/zen/go/v1',
-        apiKeyEnvVar: 'OC_GO_CC_API_KEY',
-        defaultModels: {}
-      };
-    }
-    config.providers['opencode-go'].defaultModels = {
-      technical_expert: 'kimi-k2.7-code',
-      devils_advocate: 'deepseek-v4-pro',
-      systems_thinker: 'kimi-k2.6',
-      judge: 'deepseek-v4-pro',
-      synthesis: 'kimi-k2.7-code'
-    };
+    applyPreset(config, PRESETS.highQuality);
+    console.log(chalk.green('\n✓ High Quality / OpenCode Go Preset configured.'));
+  } else if (choice === '4') {
+    applyPreset(config, PRESETS.balanced);
     console.log(chalk.green('\n✓ Balanced / OpenCode Go Preset configured.'));
   } else {
     // Custom Configuration
     console.log(chalk.bold.blue('\n--- Custom Model Configuration ---'));
-    const provider = await askQuestion('Select Provider (opencode-go / openai) [default: opencode-go]: ') || 'opencode-go';
+    const provider = await askQuestion('Select Provider (opencode-go / opencode-zen / openai) [default: opencode-go]: ') || 'opencode-go';
     config.provider = provider;
+    config.configured = true;
+    config.mode = '5x';
 
-    if (!config.providers) config.providers = {};
+    const providerDefaults = PROVIDERS[provider] || PROVIDERS['opencode-go'];
     if (!config.providers[provider]) {
       config.providers[provider] = {
-        baseUrl: await askQuestion('API Base URL: ') || 'https://opencode.ai/zen/go/v1',
-        apiKeyEnvVar: await askQuestion('API Key Env Var name: ') || 'OC_GO_CC_API_KEY',
+        baseUrl: await askQuestion('API Base URL: ') || providerDefaults.baseUrl,
+        apiKeyEnv: await askQuestion('API Key Env Var name: ') || providerDefaults.apiKeyEnv,
         defaultModels: {}
       };
     }
 
     const defaultModels = config.providers[provider].defaultModels;
-    defaultModels.technical_expert = await askQuestion('Technical Expert Model Name: ') || 'qwen3.7-plus';
-    defaultModels.devils_advocate = await askQuestion('Devil\'s Advocate Model Name: ') || 'deepseek-v4-pro';
-    defaultModels.systems_thinker = await askQuestion('Systems Thinker Model Name: ') || 'glm-5.1';
-    defaultModels.judge = await askQuestion('Judge Model Name: ') || 'qwen3.7-plus';
-    defaultModels.synthesis = await askQuestion('Synthesis Model Name: ') || 'qwen3.7-plus';
+    const fallbacks = customFallbackModels(provider);
+    defaultModels.technical_expert = await askQuestion('Technical Expert Model Name: ') || fallbacks.technical_expert;
+    defaultModels.devils_advocate = await askQuestion('Devil\'s Advocate Model Name: ') || fallbacks.devils_advocate;
+    defaultModels.systems_thinker = await askQuestion('Systems Thinker Model Name: ') || fallbacks.systems_thinker;
+    defaultModels.judge = await askQuestion('Judge Model Name: ') || fallbacks.judge;
+    defaultModels.synthesis = await askQuestion('Synthesis Model Name: ') || fallbacks.synthesis;
 
     console.log(chalk.green('\n✓ Custom configuration configured.'));
   }
@@ -184,7 +89,7 @@ async function runSetupWizard(configPath) {
   return config;
 }
 
-// Parse custom model overrides (e.g. "technical_expert=qwen3.7-max,judge=deepseek-v4-pro")
+// Parse custom model overrides (e.g. "technical_expert=kimi-k3,judge=deepseek-v4-pro")
 function parseModelOverrides(overridesStr, config, provider) {
   if (!overridesStr) return;
   const parts = overridesStr.split(',');
@@ -282,14 +187,14 @@ const program = new Command();
 program
   .name('pi-harness')
   .description('Multi-model deliberation harness based on the OpenRouter Fusion pattern')
-  .version('1.0.0')
+  .version(getPackageJson().version)
   .argument('[prompt]', 'The query or coding task to deliberate on')
   .option('-v, --verbose', 'Print raw responses from each panel expert', false)
   .option('-i, --interactive', 'Start interactive chat/REPL mode', false)
   .option('-s, --setup', 'Run the interactive configuration wizard to select presets', false)
-  .option('-p, --provider <name>', 'Provider to use (opencode-go, openai)')
+  .option('-p, --provider <name>', 'Provider to use (opencode-go, opencode-zen, openai)')
   .option('-c, --config <path>', 'Path to custom config JSON file')
-  .option('-m, --models <overrides>', 'Comma-separated model overrides (e.g. judge=deepseek-v4-pro,synthesis=glm-5.1)')
+  .option('-m, --models <overrides>', 'Comma-separated model overrides (e.g. judge=deepseek-v4-pro,synthesis=glm-5.3)')
   .action(async (prompt, options) => {
     // Determine target config path
     const targetConfigPath = options.config || path.join(process.cwd(), 'pi-harness.config.json');
@@ -318,7 +223,7 @@ program
 
     const apiClient = new ApiClient({
       baseUrl: providerConfig.baseUrl,
-      apiKeyEnvVar: providerConfig.apiKeyEnvVar
+      apiKeyEnvVar: apiKeyEnvName(providerConfig)
     });
 
     const deliberator = new Deliberator({ apiClient, config });
