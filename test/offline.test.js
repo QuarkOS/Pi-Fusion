@@ -49,6 +49,12 @@ describe('package metadata', () => {
     assert.ok(pkg.files.includes('test/'));
     assert.doesNotMatch(pkg.scripts.test, /verify-harness/);
   });
+
+  it('points npm at the GitHub repo', () => {
+    assert.equal(pkg.repository.url, 'https://github.com/QuarkOS/Pi-Fusion.git');
+    assert.equal(pkg.homepage, 'https://github.com/QuarkOS/Pi-Fusion#readme');
+    assert.equal(pkg.bugs.url, 'https://github.com/QuarkOS/Pi-Fusion/issues');
+  });
 });
 
 describe('default config', () => {
@@ -110,6 +116,15 @@ describe('CLI', () => {
     });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), pkg.version);
+    assert.doesNotMatch(result.stdout, /github\.com/i);
+  });
+
+  it('--help points at the GitHub star URL', () => {
+    const result = spawnSync(process.execPath, [path.join(root, 'bin/pi-harness.js'), '--help'], {
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Star the repo: https:\/\/github\.com\/QuarkOS\/Pi-Fusion/);
   });
 });
 

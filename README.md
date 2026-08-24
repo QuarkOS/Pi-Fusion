@@ -1,5 +1,10 @@
 # Pi Fusion
 
+[![GitHub stars](https://img.shields.io/github/stars/QuarkOS/Pi-Fusion?style=social)](https://github.com/QuarkOS/Pi-Fusion)
+[![npm version](https://img.shields.io/npm/v/@quarkos/pi-fusion)](https://www.npmjs.com/package/@quarkos/pi-fusion)
+
+If Pi Fusion helps, [star the repo](https://github.com/QuarkOS/Pi-Fusion). It is the easiest way to follow releases.
+
 A multi-model deliberation harness for the [Pi Coding Agent](https://pi.dev). Pi Fusion takes any complex technical question and runs it through a structured deliberation pipeline -- parallel expert panels, comparative analysis, and grounded synthesis -- producing answers that are more thorough and balanced than any single model can achieve alone.
 
 Inspired by the [OpenRouter Fusion](https://openrouter.ai/docs/features/fusion) design pattern. Written in Node.js with native ES Modules, requires no build steps, and ships with presets for OpenCode Go and OpenCode Zen.
