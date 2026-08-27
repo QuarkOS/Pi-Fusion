@@ -21,6 +21,7 @@ describe('syntax', () => {
       'lib/pi-ai.js',
       'lib/presets.js',
       'lib/ui.js',
+      'test/api.test.js',
       'test/offline.test.js',
     ];
     for (const file of files) {

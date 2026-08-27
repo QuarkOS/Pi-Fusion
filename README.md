@@ -176,7 +176,7 @@ lib/deliberation.js   Deliberation orchestrator (3x and 5x modes)
 lib/ui.js             Terminal formatting for CLI output
 ```
 
-The API client streams all responses to prevent gateway timeouts, accumulates token usage across calls, handles Kimi-specific temperature constraints (`temperature: 1.0`), and retries transient network errors with exponential backoff. The file-agent step after synthesis uses `deepseek-v4-flash` (cheap, near-unlimited on OpenCode Go) with tool-calling to decide what files to save.
+The API client streams all responses to prevent gateway timeouts, accumulates token usage across calls, handles Kimi-specific temperature constraints (`temperature: 1.0`), and retries transient network, rate-limit (`429`), and gateway (`5xx`) failures with `Retry-After`-aware exponential backoff. Credential, validation, and missing-model errors fail immediately. The file-agent step after synthesis uses `deepseek-v4-flash` (cheap, near-unlimited on OpenCode Go) with tool-calling to decide what files to save.
 
 ---
 
