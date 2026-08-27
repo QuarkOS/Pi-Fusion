@@ -26,10 +26,10 @@
   ],
   "scripts": {
     "start": "node bin/pi-harness.js",
-    "test": "node --test test/offline.test.js",
+    "test": "node --test test/offline.test.js test/api.test.js",
     "test:stream": "node verify-stream.mjs",
     "test:live": "node verify-harness.js",
-    "test:all": "node --test test/offline.test.js && node verify-stream.mjs && node verify-harness.js",
+    "test:all": "npm test && node verify-stream.mjs && node verify-harness.js",
     "verify:stream": "node verify-stream.mjs"
   },
   "keywords": [
