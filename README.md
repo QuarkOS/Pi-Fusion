@@ -48,14 +48,14 @@ Three LLM calls instead of five. Two parallel experts (Technical + Devil's Advoc
 
 ## Presets
 
-IDs below were checked on 2026-08-24 against [OpenCode Go](https://opencode.ai/docs/go/), `GET https://opencode.ai/zen/go/v1/models`, [OpenCode Zen](https://opencode.ai/docs/zen/), and `GET https://opencode.ai/zen/v1/models`. Do not copy a Zen-only id into a Go preset.
+IDs below were checked on 2026-08-28 against [OpenCode Go](https://opencode.ai/docs/go/), `GET https://opencode.ai/zen/go/v1/models`, [OpenCode Zen](https://opencode.ai/docs/zen/), and `GET https://opencode.ai/zen/v1/models`. Do not copy a Zen-only id into a Go preset. `gpt-5.6-sol` is still Zen/OpenAI only.
 
 | Preset | Mode | Models | Catalog | Use case |
 |--------|------|--------|---------|----------|
 | **GLM-5.3 Fusion** | 3x | All `glm-5.3` | OpenCode Go | Default. Latest GLM on Go. |
 | **Balanced** | 5x | `kimi-k3`, `deepseek-v4-pro`, `glm-5.3` | OpenCode Go | Three labs, still on the Go subscription. |
 | **High Quality** | 5x | `kimi-k3`, `qwen3.8-max` | OpenCode Go | Kimi + latest Qwen on Go (`qwen3.8-max` is not on Zen). |
-| **Quality / Frontier** | 5x | `grok-4.6`, `gpt-5.6-luna`, `kimi-k3` | OpenCode Zen | Newest Grok. `grok-4.6` is not on Go. |
+| **Quality / Frontier** | 5x | `grok-4.6`, `gpt-5.6-luna`, `kimi-k3` | OpenCode Zen | Newest Grok. Stays on Zen even though `grok-4.6` is now on Go too. |
 | **Custom** | 5x | User-defined | Any | Full control over every model slot. |
 
 Role assignments:
@@ -63,7 +63,7 @@ Role assignments:
 - **GLM Fusion.** Every slot is `glm-5.3` on Go. Zen still lists `glm-5.2` as its newest GLM, so this preset stays on Go.
 - **Balanced.** Technical Expert and Synthesis: `kimi-k3`. Devil's Advocate and Judge: `deepseek-v4-pro`. Systems Thinker: `glm-5.3`.
 - **High Quality.** Technical Expert, Systems Thinker, and Synthesis: `kimi-k3`. Devil's Advocate and Judge: `qwen3.8-max`.
-- **Quality / Frontier.** Technical Expert and Synthesis: `grok-4.6`. Devil's Advocate and Judge: `gpt-5.6-luna`. Systems Thinker: `kimi-k3`. Served from `https://opencode.ai/zen/v1` with `OPENCODE_API_KEY`. If you must stay on Go, the equivalent Grok slot is `grok-4.5`, not 4.6.
+- **Quality / Frontier.** Technical Expert and Synthesis: `grok-4.6`. Devil's Advocate and Judge: `gpt-5.6-luna`. Systems Thinker: `kimi-k3`. Served from `https://opencode.ai/zen/v1` with `OPENCODE_API_KEY`. If you force this preset onto Go, the Grok slot is now `grok-4.6`. Go still lists `grok-4.5`.
 
 ### Which catalog an id lives on
 
@@ -75,11 +75,11 @@ Role assignments:
 | `deepseek-v4-flash` | yes | yes | Default file-agent model. |
 | `qwen3.8-max` | yes | no | High Quality stays on Go for this reason. |
 | `gpt-5.6-luna` | yes | yes | Also on the public OpenAI API. |
-| `grok-4.5` | yes | yes | Newest Grok **on Go**. |
-| `grok-4.6` | no | yes | xAI id `grok-4.6` (12 Aug 2026). Also `https://api.x.ai/v1`. Putting this on a Go 3x preset will 404. |
+| `grok-4.5` | yes | yes | Still on both catalogs. |
+| `grok-4.6` | yes | yes | Newest Grok on both. Also `https://api.x.ai/v1`. |
 | `gpt-5.6-sol` | no | yes | Public OpenAI flagship. Used for the packaged `openai` provider, not for Go. |
 
-Go also lists `grok-4.5`, `glm-5.2`, `kimi-k2.7-code`, and others. Those still work; the presets pick the newest id that exists on that catalog.
+Go also lists `grok-4.5`, `glm-5.2`, `kimi-k2.7-code`, and others. Those still work. The presets pick the newest id that exists on that catalog.
 
 ---
 
@@ -113,7 +113,7 @@ $env:OC_GO_CC_API_KEY = "sk-opencode-..."
 export OC_GO_CC_API_KEY="sk-opencode-..."
 ```
 
-The Quality / Frontier preset uses OpenCode Zen (`OPENCODE_API_KEY`) because `grok-4.6` is not on the Go catalog. The same OpenCode account key often works for both endpoints.
+The Quality / Frontier preset uses OpenCode Zen (`OPENCODE_API_KEY`). Quality stays on Zen as a product choice. `grok-4.6` is now on both Go and Zen. The same OpenCode account key often works for both endpoints.
 
 If no OpenCode key is found, the client falls back to `OPENAI_API_KEY` and standard OpenAI endpoints. Pi Fusion also reads keys from Pi's own `auth.json` if you have connected a provider through Pi.
 
@@ -173,6 +173,8 @@ lib/api.js            OpenAI-compatible streaming API client with retry logic
 lib/config.js         Packaged default config (shared by CLI and Pi entry)
 lib/presets.js        Go / Zen / OpenAI model IDs and preset maps
 lib/deliberation.js   Deliberation orchestrator (3x and 5x modes)
+lib/event-stream.js   Pi assistant-message event stream without importing pi-ai
+lib/pi-ai.js          Lazy load of optional @earendil-works/pi-ai peer
 lib/ui.js             Terminal formatting for CLI output
 ```
 

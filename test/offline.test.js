@@ -67,10 +67,10 @@ describe('default config', () => {
       assert.equal(models[role], 'glm-5.3', role);
     }
     assert.equal(config.providers['opencode-go'].baseUrl, 'https://opencode.ai/zen/go/v1');
-    assert.ok(!Object.values(models).includes('grok-4.6'), 'Go default must not use Zen-only grok-4.6');
+    assert.ok(!Object.values(models).includes('grok-4.6'), 'Go default stays glm-5.3 Fusion, not grok-4.6');
   });
 
-  it('puts grok-4.6 on OpenCode Zen, not Go', () => {
+  it('puts grok-4.6 on OpenCode Zen for Quality', () => {
     const zen = config.providers['opencode-zen'];
     assert.equal(zen.baseUrl, 'https://opencode.ai/zen/v1');
     assert.equal(zen.defaultModels.technical_expert, 'grok-4.6');
@@ -101,12 +101,27 @@ describe('presets', () => {
     assert.equal(PRESETS.highQuality.defaultModels.devils_advocate, 'qwen3.8-max');
     assert.equal(PRESETS.quality.provider, 'opencode-zen');
     assert.equal(PRESETS.quality.defaultModels.technical_expert, 'grok-4.6');
-    assert.equal(GO_QUALITY_FALLBACK_MODELS.technical_expert, 'grok-4.5');
+    assert.equal(GO_QUALITY_FALLBACK_MODELS.technical_expert, 'grok-4.6');
+    assert.equal(GO_QUALITY_FALLBACK_MODELS.synthesis, 'grok-4.6');
 
     const applied = applyPreset({ providers: {} }, PRESETS.quality);
     assert.equal(applied.providers['opencode-zen'].baseUrl, 'https://opencode.ai/zen/v1');
     assert.ok(!JSON.stringify(PRESETS.glmFusion).includes('grok-4.6'));
     assert.ok(!JSON.stringify(PRESETS.balanced).includes('grok-4.6'));
+  });
+
+  it('documents grok-4.6 on both catalogs as of 2026-08-28', () => {
+    const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+    const presetsSrc = fs.readFileSync(path.join(root, 'lib/presets.js'), 'utf8');
+    assert.match(readme, /checked on 2026-08-28/);
+    assert.match(readme, /`grok-4\.6` \| yes \| yes/);
+    assert.doesNotMatch(readme, /grok-4\.6` is not on Go/);
+    assert.doesNotMatch(readme, /Putting this on a Go 3x preset will 404/);
+    assert.match(readme, /lib\/event-stream\.js/);
+    assert.match(readme, /lib\/pi-ai\.js/);
+    assert.match(presetsSrc, /checked 2026-08-28/);
+    assert.match(presetsSrc, /grok-4\.6 is on Go, Zen, and xAI/);
+    assert.doesNotMatch(presetsSrc, /It is not on Go/);
   });
 });
 
