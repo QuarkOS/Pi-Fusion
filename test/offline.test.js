@@ -110,18 +110,26 @@ describe('presets', () => {
     assert.ok(!JSON.stringify(PRESETS.balanced).includes('grok-4.6'));
   });
 
-  it('documents grok-4.6 on both catalogs as of 2026-08-28', () => {
+  it('documents glm-5.3 and grok-4.6 on both catalogs as of 2026-09-08', () => {
     const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
     const presetsSrc = fs.readFileSync(path.join(root, 'lib/presets.js'), 'utf8');
-    assert.match(readme, /checked on 2026-08-28/);
+    assert.match(readme, /checked on 2026-09-08/);
     assert.match(readme, /`grok-4\.6` \| yes \| yes/);
+    assert.match(readme, /`glm-5\.3` \| yes \| yes/);
+    assert.match(readme, /glm-5\.3-flash/);
     assert.doesNotMatch(readme, /grok-4\.6` is not on Go/);
     assert.doesNotMatch(readme, /Putting this on a Go 3x preset will 404/);
+    assert.doesNotMatch(readme, /Zen still lists `glm-5\.2` as its newest GLM/);
+    assert.doesNotMatch(readme, /Zen's newest GLM is `glm-5\.2`/);
     assert.match(readme, /lib\/event-stream\.js/);
     assert.match(readme, /lib\/pi-ai\.js/);
-    assert.match(presetsSrc, /checked 2026-08-28/);
+    assert.match(presetsSrc, /checked 2026-09-08/);
     assert.match(presetsSrc, /grok-4\.6 is on Go, Zen, and xAI/);
+    assert.match(presetsSrc, /glm-5\.3 is on both Go and Zen/);
+    assert.match(presetsSrc, /qwen3\.8-max remains Go-only/);
     assert.doesNotMatch(presetsSrc, /It is not on Go/);
+    assert.doesNotMatch(presetsSrc, /glm-5\.3 and qwen3\.8-max are Go-only/);
+    assert.doesNotMatch(presetsSrc, /Zen's newest GLM is still glm-5\.2/);
   });
 });
 

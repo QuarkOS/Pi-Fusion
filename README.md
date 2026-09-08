@@ -48,7 +48,7 @@ Three LLM calls instead of five. Two parallel experts (Technical + Devil's Advoc
 
 ## Presets
 
-IDs below were checked on 2026-08-28 against [OpenCode Go](https://opencode.ai/docs/go/), `GET https://opencode.ai/zen/go/v1/models`, [OpenCode Zen](https://opencode.ai/docs/zen/), and `GET https://opencode.ai/zen/v1/models`. Do not copy a Zen-only id into a Go preset. `gpt-5.6-sol` is still Zen/OpenAI only.
+IDs below were checked on 2026-09-08 against [OpenCode Go](https://opencode.ai/docs/go/), `GET https://opencode.ai/zen/go/v1/models`, [OpenCode Zen](https://opencode.ai/docs/zen/), and `GET https://opencode.ai/zen/v1/models`. Do not copy a Zen-only id into a Go preset. `gpt-5.6-sol` is still Zen/OpenAI only.
 
 | Preset | Mode | Models | Catalog | Use case |
 |--------|------|--------|---------|----------|
@@ -60,7 +60,7 @@ IDs below were checked on 2026-08-28 against [OpenCode Go](https://opencode.ai/d
 
 Role assignments:
 
-- **GLM Fusion.** Every slot is `glm-5.3` on Go. Zen still lists `glm-5.2` as its newest GLM, so this preset stays on Go.
+- **GLM Fusion.** Every slot is `glm-5.3` on Go. The packaged default stays on Go as a product choice. Both catalogs list `glm-5.3`.
 - **Balanced.** Technical Expert and Synthesis: `kimi-k3`. Devil's Advocate and Judge: `deepseek-v4-pro`. Systems Thinker: `glm-5.3`.
 - **High Quality.** Technical Expert, Systems Thinker, and Synthesis: `kimi-k3`. Devil's Advocate and Judge: `qwen3.8-max`.
 - **Quality / Frontier.** Technical Expert and Synthesis: `grok-4.6`. Devil's Advocate and Judge: `gpt-5.6-luna`. Systems Thinker: `kimi-k3`. Served from `https://opencode.ai/zen/v1` with `OPENCODE_API_KEY`. If you force this preset onto Go, the Grok slot is now `grok-4.6`. Go still lists `grok-4.5`.
@@ -69,7 +69,7 @@ Role assignments:
 
 | ID | OpenCode Go (`/zen/go/v1`) | OpenCode Zen (`/zen/v1`) | Notes |
 |----|----------------------------|--------------------------|-------|
-| `glm-5.3` | yes | no | Newest GLM on Go. Zen's newest GLM is `glm-5.2`. |
+| `glm-5.3` | yes | yes | Newest GLM on both. Both catalogs also list `glm-5.3-flash`. |
 | `kimi-k3` | yes | yes | Newest Kimi on both. |
 | `deepseek-v4-pro` | yes | yes | |
 | `deepseek-v4-flash` | yes | yes | Default file-agent model. |
